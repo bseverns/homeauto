@@ -2,160 +2,97 @@
 Systems and diagrams for home automation
 
 flowchart LR
-  %% ================================
-  %% BACKBONE / NETWORK EDGE
-  %% ================================
-  INET((Internet))
-  ONT([Fiber / ONT])
-  BRIDGE[C4000XG\nTransparent Bridge]
-  ROUTER[Your Router/Firewall\n• WAN: PPPoE/IPoE (VLAN if req)\n• LAN: DHCP ON\n• DNS handed to clients = ORIN (Pi-hole)\n• IPv6 RA/DHCPv6 → ORIN as DNS]
-  SWITCH[[LAN Switch / Fabric]]
+  INET((Internet)) --> ONT[ONT / Fiber]
+  ONT --> BRIDGE[C4000XG (Transparent Bridge)]
+  BRIDGE --> ROUTER[Your Router/Firewall\nWAN: PPPoE/IPoE (+VLAN if needed)\nLAN: DHCP ON\nDNS to clients = ORIN (Pi-hole)]
+  ROUTER --> SWITCH[[LAN Switch]]
 
-  INET --- ONT --> BRIDGE --> ROUTER --> SWITCH
+  SWITCH --> ORIN[Jetson ORIN (Docker stack)\nHA, Node-RED, MQTT, Pi-hole, Unbound,\nSnapserver, Mopidy, librespot, OctoFarm, Tailscale]
+  SWITCH --> NAS[(NAS / Files)]
+  SWITCH --> MACPRO[Mac Pro 3,1 (REAPER)]
+  SWITCH --> NANO_A[Jetson NANO-A (Frigate)]
+  SWITCH --> NANO_B[Jetson NANO-B (OctoPrint host)]
+  SWITCH --> OCTOPI[OctoPi/Klipper nodes\nPrinters #2/#3]
+  SWITCH --> ROOMS[Snapclients in rooms\n(Studio DN, Dining, Studio UP)]
 
-  %% ================================
-  %% CORE ORCHESTRATOR (ORIN)
-  %% ================================
-  subgraph ORIN[Jetson ORIN — "the conductor"]
-    direction TB
-    subgraph ORIN_STACK[Docker stack on ORIN]
-      direction LR
-      HA[Home Assistant :8123\nDashboards, Automations, Vivint, Google Cals]
-      NODERED[Node-RED :1880\nFlows, Schedules]
-      MQTT[ Mosquitto :1883\nMessage Bus ]
-      VIVINT[HACS: Vivint\nPanel/Sensors/Locks/RTSP modes]
-      WYOMING[Local Voice (Wyoming)\nopenWakeWord → Whisper STT → Piper TTS]
-      Pihole[Pi-hole :53/:8081\nDNS (LAN) + optional DHCP OFF]
-      Unbound[Unbound :5335\nValidating Recursive DNS]
-      PORTALS[Portainer • Guacamole • Caddy\nAdmin & UI access]
-      TAILSCALE[Tailscale\nPrivate remote access + Tailnet DNS]
-      %% Media / Audio brain
-      SNAPSERVER[Snapserver :1780\nMulti-stream, synced audio]
-      MOPIDY[Mopidy → /tmp/snapfifo_music\nNAS, Bandcamp, Webradio]
-      LIBRESPOT[librespot → /tmp/snapfifo_spotify\nSpotify Connect sink]
-      VINYL_SRC[ALSA/TCP line-in\nUSB ADC near TT or ffmpeg push]
-      OCTOFARM[OctoFarm / Repetier-Server\nPrint-farm control/UI]
-      %% Optional research/doc
-      MINIFLUX[Miniflux (RSS) • Paperless-ngx (OCR/docs)\n(optional now, add later)]
-    end
+  ROUTER -- "DHCP hands out ORIN as DNS (v4/v6)" --> CLIENTS[[All LAN Clients]]
+  CLIENTS -->|DNS :53| PIHOLE[Pi-hole on ORIN] --> UNBOUND[Unbound on ORIN]
+end
 
-    %% Snapserver streams (named)
-    MUSIC(["stream: music"])
-    SPOT(["stream: spotify"])
-    VINYL(["stream: vinyl"])
-    NOTIFY(["stream: notify (priority)"])
-
-    %% Wire audio sources to streams
-    MOPIDY -->|raw PCM FIFO| MUSIC
-    LIBRESPOT -->|raw PCM FIFO| SPOT
-    VINYL_SRC -->|ALSA or TCP 1704| VINYL
-
-    %% HA voice → notify stream
-    WYOMING -->|Piper TTS\n(HA tts.speak)| NOTIFY
-
-    %% DNS path
-    Pihole -->|upstream 127.0.0.1#5335| Unbound
+flowchart TD
+  subgraph ORIN[Jetson ORIN ("the conductor")]
+    HA[Home Assistant]
+    NR[Node-RED]
+    MQTT[MQTT (Mosquitto)]
+    VIVINT[Vivint (HACS)]
+    WY[Local Voice (Wyoming)\nopenWakeWord -> Whisper -> Piper]
+    PIHOLE[Pi-hole :53/:8081]
+    UNB[Unbound :5335]
+    SNAP[Snapserver :1780\nstreams: music / spotify / vinyl / notify]
+    MOP[Mopidy -> /tmp/snapfifo_music]
+    LIB[librespot -> /tmp/snapfifo_spotify]
+    VIN[Vinyl line-in (ALSA or TCP push)]
+    OFARM[OctoFarm / Repetier-Server]
+    TAIL[Tailscale]
+    OPS[Portainer / Guacamole / Caddy]
   end
 
-  %% ORIN on the LAN
-  SWITCH --- ORIN
+  %% DNS
+  PIHOLE -- "upstream 127.0.0.1#5335" --> UNB
 
-  %% ================================
-  %% STORAGE / WORKSTATIONS / EDGES
-  %% ================================
-  NAS[(NAS / File Server)\nMusic, Docs, Backups]
-  MACPRO[Mac Pro 3,1 (Studio Workstation)\nREAPER (Web Remote + OSC)]
-  NANO_A[Jetson NANO-A\nFrigate + TensorRT\nRTSP cams → detection → MQTT]
-  NANO_B[Jetson NANO-B\nOctoPrint host (USB→Printer #1)\n+ MQTT plugin]
+  %% Voice -> HA -> TTS
+  WY --> HA
+  HA -- "tts.speak (Piper)" --> SNAP
 
-  SWITCH --- NAS
-  SWITCH --- MACPRO
-  SWITCH --- NANO_A
-  SWITCH --- NANO_B
+  %% Media -> Snapserver streams
+  MOP -- "PCM FIFO -> music" --> SNAP
+  LIB -- "PCM FIFO -> spotify" --> SNAP
+  VIN -- "ALSA/TCP -> vinyl" --> SNAP
 
-  %% REAPER control path
-  HA -- HTTP/OSC triggers --> MACPRO
-  NODERED -- HTTP/OSC macros --> MACPRO
+  %% Vivint + HA
+  VIVINT <--> HA
+  HA <--> MQTT
+  NR <--> MQTT
+  HA <--> NR
 
-  %% Cameras/Frigate path
-  NANO_A -- MQTT events --> MQTT
-  HA --- VIVINT
-  VIVINT --> HA
-  VIVINT -. optional RTSP .-> NANO_A
+  %% Studio control
+  HA -- "HTTP/OSC" --> MACPRO[REAPER on Mac Pro 3,1]
+  NR -- "HTTP/OSC macros" --> MACPRO
 
-  %% Print farm path
-  NANO_B -->|OctoPrint API+MQTT| OCTOFARM
-  OCTOPI[OctoPi / Klipper nodes\nPrinters #2/#3]
-  SWITCH --- OCTOPI
-  OCTOPI -->|Moonraker/OctoPrint| OCTOFARM
-  OCTOFARM --> MQTT
-  HA <-- MQTT events (start/fail/temps) --> MQTT
+  %% Print farm
+  OFARM <--> HA
+  OFARM <--> MQTT
+  NANO_B[OctoPrint host] -- "API + MQTT" --> OFARM
+  OCTOPI[OctoPi/Klipper] -- "OctoPrint/Moonraker" --> OFARM
 
-  %% ================================
-  %% DNS / CLIENTS FLOW
-  %% ================================
-  subgraph DNS_PATH[DNS & Privacy]
-    direction LR
-    CLIENTS[[All LAN Clients]]
-    CLIENTS -->|DNS queries :53| Pihole --> Unbound --> INET
-  end
-  ROUTER -- DHCP hands out\nORIN (Pi-hole) v4/v6 as DNS --> CLIENTS
+  %% Cameras/Vision
+  NANO_A[Frigate] -- "RTSP cams + detections" --> MQTT
+  HA <--> NANO_A
 
-  %% ================================
-  %% MULTI-ROOM AUDIO — PER-ROOM SOURCE CONTROL
-  %% ================================
-  subgraph AUDIO[Multi-room audio (per-room sources)]
-    direction TB
-    SNAPWEB[Snapweb UI :1780\nGroup/Stream control]
-    HA_SRC[HA "Source Select" tiles\n(input_select + JSON-RPC)]
-    subgraph GROUPS[Snapcast Groups (rooms)]
-      direction LR
-      G_STUDIODN[[Group: STUDIO_DN\nclient: snapclient + DAC/amp]]
-      G_DINING[[Group: DINING\nclient: snapclient + DAC/amp]]
-      G_STUDIOUP[[Group: STUDIO_UP\nclient: snapclient + DAC/amp]]
-    end
+flowchart LR
+  SNAP[Snapserver\nstreams: music | spotify | vinyl | notify]
+  MOP[Mopidy -> /tmp/snapfifo_music] -->|music| SNAP
+  LIB[librespot -> /tmp/snapfifo_spotify] -->|spotify| SNAP
+  VIN[Vinyl line-in (ALSA or TCP)] -->|vinyl| SNAP
 
-    %% Control planes
-    SNAPWEB -->|Group.SetStream\n(assign stream)| SNAPSERVER
-    HA_SRC -->|JSON-RPC → Group.SetStream| SNAPSERVER
-
-    %% Each group can select any stream (dotted = selectable)
-    G_STUDIODN -.-> MUSIC
-    G_STUDIODN -.-> SPOT
-    G_STUDIODN -.-> VINYL
-
-    G_DINING -.-> MUSIC
-    G_DINING -.-> SPOT
-    G_DINING -.-> VINYL
-
-    G_STUDIOUP -.-> MUSIC
-    G_STUDIOUP -.-> SPOT
-    G_STUDIOUP -.-> VINYL
-
-    %% Spoken notifications (room-scoped)
-    HA -->|snapcast.snapshot → tts.speak (Piper) → snapcast.restore| G_DINING
-    WYOMING --> NOTIFY
-    NOTIFY --> SNAPSERVER
+  subgraph GROUPS[Snapcast Groups (rooms)]
+    SDN[[Group: STUDIO_DN\nsnapclient + DAC/amp]]
+    DIN[[Group: DINING\nsnapclient + DAC/amp]]
+    SUP[[Group: STUDIO_UP\nsnapclient + DAC/amp]]
   end
 
-  %% Connect audio control to ORIN stack
-  ORIN_STACK --> SNAPSERVER
-  ORIN_STACK --> HA
-  ORIN_STACK --> WYOMING
-  SNAPWEB --- SNAPSERVER
-  HA_SRC --- HA
+  %% Each group may select any stream (we show all bindings explicitly)
+  SNAP -- "select stream: music/spotify/vinyl" --> SDN
+  SNAP -- "select stream: music/spotify/vinyl" --> DIN
+  SNAP -- "select stream: music/spotify/vinyl" --> SUP
 
-  %% ================================
-  %% REMOTE / ADMIN ACCESS
-  %% ================================
-  subgraph REMOTE[Off-site & Admin]
-    direction LR
-    TAILCLIENT[(Laptops/Phones on Tailnet)]
-    TAILCLIENT -->|Private access| TAILSCALE
-    TAILSCALE --> HA
-    TAILSCALE --> SNAPSERVER
-    TAILSCALE --> OCTOFARM
-    TAILSCALE --> Pihole
-    PORTALS --- HA
-    PORTALS --- ORIN
-  end
+  %% Control faces
+  SNAPWEB[Snapweb :1780\n(assign stream to group)] --> SNAP
+  HA[Home Assistant\n(source tiles via JSON-RPC)] --> SNAP
+
+  %% Scoped notifications (snapshot -> speak -> restore)
+  HA -- "snapcast.snapshot" --> DIN
+  HA -- "tts.speak (Piper) -> notify" --> SNAP
+  SNAP -- "to group (temporary)" --> DIN
+  HA -- "snapcast.restore" --> DIN
+
