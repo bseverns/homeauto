@@ -69,15 +69,14 @@ ENABLE_IPV6=true
 
 ### 1. Scaffold volumes once
 
-Most services persist to `./data` or `./config`. Run this once so Docker doesn’t invent root-owned folders wherever:
+Most services persist to `./data` or `./config`. Instead of the mega-`mkdir`, let the repo do the grunt work:
 
 ```bash
-mkdir -p data/{homeassistant,nodered,mosquitto/config,mosquitto/data,mosquitto/log,\
-  pihole/etc-pihole,pihole/etc-dnsmasq.d,unbound,snapcast/{config,fifo},mopidy,\
-  librespot/cache,octofarm,tailscale,portainer} config/mopidy
+./scripts/bootstrap-volumes.sh
 ```
 
-Snapserver expects FIFOs in `data/snapcast/fifo`. Create them after the first boot, or pre-create named pipes if you’re fancy.
+The script is idempotent and safe to rerun; it creates every bind-mounted directory, peeks at `.env` for `MOPIDY_FIFO` and `LIBRESPOT_FIFO`, and drops in Snapcast-ready named pipes (or defaults to `./data/snapcast/fifo/snapfifo_*`).
+If you point those FIFO vars at `/tmp` or some other haunt, the script will happily chase them down and make the pipes there too.
 
 ### 2. Light the stack
 
