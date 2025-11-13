@@ -36,6 +36,65 @@ You’ll customize IPs, names, and ports below.
 
 ---
 
+## Compose stack: straight from the map
+
+Tired of translating diagrams into YAML by hand? Same. The new [`docker-compose.yml`](./docker-compose.yml) is a faithful mirror of the Option C map—no mystery containers, no "lol just install later". Drop it on the Orin (or Portainer stack it) and you get the whole conductor bundle in one punch.
+
+### 0. Prime a `.env`
+
+Copy the variable table above into a `.env` next to the compose file. Here’s a starter that matches the map notation:
+
+```dotenv
+TZ=America/Los_Angeles
+ORIN_HOSTNAME=orin-core
+ORIN_IP=192.168.50.50
+ROUTER_LAN_GATEWAY=192.168.50.1
+ROUTER_DNS_V4=192.168.50.50
+ROUTER_DNS_V6=fd00::50
+MOPIDY_FIFO=/tmp/snapfifo_music
+LIBRESPOT_FIFO=/tmp/snapfifo_spotify
+VINYL_ALSA_DEV=hw:1,0
+TAILSCALE_AUTHKEY=tskey-please-set
+PIHOLE_PASSWORD=change-me
+ENABLE_IPV6=true
+```
+
+> **Why `.env`?** Compose slurps it automatically, and it keeps the YAML clean enough to read while you’re SSH’d in at 2 a.m.
+
+### 1. Scaffold volumes once
+
+Most services persist to `./data` or `./config`. Run this once so Docker doesn’t invent root-owned folders wherever:
+
+```bash
+mkdir -p data/{homeassistant,nodered,mosquitto/config,mosquitto/data,mosquitto/log,\
+  pihole/etc-pihole,pihole/etc-dnsmasq.d,unbound,snapcast/{config,fifo},mopidy,\
+  librespot/cache,octofarm,tailscale,portainer} config/mopidy
+```
+
+Snapserver expects FIFOs in `data/snapcast/fifo`. Create them after the first boot, or pre-create named pipes if you’re fancy.
+
+### 2. Light the stack
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+> **Heads-up:** the audio pieces (Snapserver, Mopidy, librespot, vinyl ingest) all run in host network mode so ALSA/FIFO traffic works. If you change ports, update the Mermaid diagrams too—future you will thank present you.
+
+### 3. Post-boot checklist
+
+- `http://$ORIN_IP:8123` → Home Assistant onboarding.
+- `http://$ORIN_IP:1880` → Node-RED flows (drop in your OSC/HTTP bridges).
+- `http://$ORIN_IP:4000` → OctoFarm, point it at NANO-B and OctoPi nodes.
+- `http://$ORIN_IP/admin` → Pi-hole (DNS upstream already chained to Unbound).
+- `tailscale status` inside the container once you `docker exec -it tailscale tailscale up`.
+- Snapweb on `http://$ORIN_IP:1780` for group/stream wiring.
+
+Once the stack is up, the rest of this README still functions as your north star—automations, audio routing, Vivint glue, all unchanged.
+
+---
+
 ## 1) Network backbone (Option C)
 
 ```mermaid
