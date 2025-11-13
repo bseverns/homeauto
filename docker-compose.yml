@@ -1,0 +1,202 @@
+version: "3.9"
+
+# Jetson Orin core stack from the Option C system map.
+# Drop a `.env` beside this file with at least TZ, ORIN_IP, ROUTER_DNS_V4, ROUTER_DNS_V6, MOPIDY_FIFO, LIBRESPOT_FIFO, VINYL_ALSA_DEV.
+
+x-shared-env: &default-env
+  TZ: "${TZ:-UTC}"
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    environment:
+      <<: *default-env
+      SUPERVISOR: "false"
+    volumes:
+      - ./data/homeassistant:/config
+    depends_on:
+      - mosquitto
+      - nodered
+      - snapserver
+
+  nodered:
+    image: nodered/node-red:latest
+    container_name: nodered
+    restart: unless-stopped
+    ports:
+      - "1880:1880"
+    environment:
+      <<: *default-env
+    volumes:
+      - ./data/nodered:/data
+    depends_on:
+      - mosquitto
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    environment:
+      <<: *default-env
+    volumes:
+      - ./data/mosquitto/config:/mosquitto/config
+      - ./data/mosquitto/data:/mosquitto/data
+      - ./data/mosquitto/log:/mosquitto/log
+
+  pihole:
+    image: pihole/pihole:2024.07.0
+    container_name: pihole
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      FTLCONF_LOCAL_IPV4: "${ORIN_IP}"
+      PIHOLE_DNS_: "127.0.0.1#5335"
+      WEBPASSWORD: "${PIHOLE_PASSWORD:-change-me}"
+      DNSMASQ_LISTENING: all
+      REV_SERVER: "true"
+      REV_SERVER_DOMAIN: "lan"
+      REV_SERVER_TARGET: "${ROUTER_LAN_GATEWAY:-${ROUTER_DNS_V4}}"
+      IPv6: "${ENABLE_IPV6:-true}"
+      DNS_FQDN_REQUIRED: "true"
+      DNS_BOGUS_PRIV: "true"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./data/pihole/etc-pihole:/etc/pihole
+      - ./data/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    depends_on:
+      - unbound
+
+  unbound:
+    image: mvance/unbound:latest
+    container_name: unbound
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+    volumes:
+      - ./data/unbound:/opt/unbound/etc/unbound
+
+  snapserver:
+    image: jcorporation/snapcast:latest
+    container_name: snapserver
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+    volumes:
+      - ./data/snapcast/config:/etc/snapserver
+      - type: bind
+        source: ./data/snapcast/fifo
+        target: /var/lib/snapserver
+
+  mopidy:
+    image: wernight/mopidy:latest
+    container_name: mopidy
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      PULSE_SERVER: "unix:/tmp/pulse-native"
+    volumes:
+      - ./data/mopidy:/var/lib/mopidy
+      - ./config/mopidy:/etc/mopidy
+      - type: bind
+        source: ${MOPIDY_FIFO}
+        target: /tmp/snapfifo_music
+    depends_on:
+      - snapserver
+
+  librespot:
+    image: librespotorg/librespot:latest
+    container_name: librespot
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      LIBRESPOT_NAME: "${ORIN_HOSTNAME:-orin}-spotify"
+      LIBRESPOT_BITRATE: "320"
+      LIBRESPOT_CACHE: "/cache"
+      LIBRESPOT_BACKEND: pipe
+      LIBRESPOT_DEVICE: /tmp/snapfifo_spotify
+    volumes:
+      - ./data/librespot/cache:/cache
+      - type: bind
+        source: ${LIBRESPOT_FIFO}
+        target: /tmp/snapfifo_spotify
+    depends_on:
+      - snapserver
+    command: >-
+      --name "${ORIN_HOSTNAME:-orin}-spotify"
+      --backend pipe
+      --device /tmp/snapfifo_spotify
+      --bitrate 320
+      --enable-volume-normalisation
+      --cache /cache
+
+  vinyl_ingest:
+    image: linuxserver/ffmpeg:latest
+    container_name: vinyl-ingest
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    environment:
+      <<: *default-env
+    devices:
+      - "${VINYL_ALSA_DEV:-/dev/snd}:/dev/snd"
+    command: >-
+      -hide_banner -loglevel warning
+      -f alsa -i ${VINYL_ALSA_DEV}
+      -ac 2 -ar 48000 -f s16le tcp://${ORIN_IP:-127.0.0.1}:1704
+    depends_on:
+      - snapserver
+
+  octofarm:
+    image: octofarm/octofarm:latest
+    container_name: octofarm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      <<: *default-env
+    volumes:
+      - ./data/octofarm:/app/config
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: tailscale
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      TS_AUTHKEY: "${TAILSCALE_AUTHKEY:-tskey-please-set}"
+      TS_STATE_DIR: /var/lib/tailscale
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    volumes:
+      - ./data/tailscale:/var/lib/tailscale
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/portainer:/data
+    environment:
+      <<: *default-env
+
+volumes: {}
+
