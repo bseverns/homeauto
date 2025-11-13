@@ -1,0 +1,40 @@
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["tag:admin", "group:ops"],
+      "dst": [
+        "orin-core:22",
+        "orin-core:8123",
+        "orin-core:1780",
+        "orin-core:8081"
+      ]
+    },
+    {
+      "action": "accept",
+      "src": ["tag:display"],
+      "dst": ["orin-core:8123"]
+    },
+    {
+      "action": "accept",
+      "src": ["tag:automation"],
+      "dst": ["orin-core:1883"]
+    }
+  ],
+  "dns": {
+    "magicDNS": true,
+    "nameservers": [
+      { "ip": "100.x.y.z" }
+    ],
+    "overrideLocalDNS": true,
+    "searchDomains": ["homeauto.tail"]
+  },
+  "nodeAttrs": [
+    {
+      "target": ["tag:admin"],
+      "attr": [
+        { "key": "allow-ssh", "value": "true" }
+      ]
+    }
+  ]
+}

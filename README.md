@@ -48,24 +48,9 @@ Start by copying the new [`.env.example`](./.env.example) into place and then ri
 cp .env.example .env
 ```
 
-Copy the variable table above into a `.env` next to the compose file. Here’s a starter that matches the map notation:
-
-```dotenv
-TZ=America/Los_Angeles
-ORIN_HOSTNAME=orin-core
-ORIN_IP=192.168.50.50
-ROUTER_LAN_GATEWAY=192.168.50.1
-ROUTER_DNS_V4=192.168.50.50
-ROUTER_DNS_V6=fd00::50
-MOPIDY_FIFO=/tmp/snapfifo_music
-LIBRESPOT_FIFO=/tmp/snapfifo_spotify
-VINYL_ALSA_DEV=hw:1,0
-TAILSCALE_AUTHKEY=tskey-please-set
-PIHOLE_PASSWORD=change-me
-ENABLE_IPV6=true
-```
-
 > **Why `.env`?** Compose slurps it automatically, and it keeps the YAML clean enough to read while you’re SSH’d in at 2 a.m.
+
+Use the **Variables** table above as your field guide while you edit—no need to duplicate the contents here. The `.env.example` file already mirrors those keys; keep it close and adjust values for your LAN.
 
 ### 1. Scaffold volumes once
 
@@ -79,6 +64,39 @@ The script is idempotent and safe to rerun; it creates every bind-mounted direct
 If you point those FIFO vars at `/tmp` or some other haunt, the script will happily chase them down and make the pipes there too.
 
 It also seeds **Unbound**’s starter config under [`config/unbound/`](./config/unbound). The main file is [`unbound.conf`](./config/unbound/unbound.conf) and the fragments in [`conf.d/`](./config/unbound/conf.d) carry the access-control and optional forward-zone stubs. Hack on those when you want to change who can query the resolver or where it forwards instead of root walking.
+
+### Mopidy config primer
+
+The bootstrap script also carves out [`config/mopidy/`](./config/mopidy/) so the Mopidy container isn’t running blind. Drop a `mopidy.conf` in there before you `up` the stack—here’s a minimal-but-useful starting point that pipes audio into the Snapcast FIFO and exposes both local files and Spotify:
+
+```ini
+[core]
+cache_dir = /var/lib/mopidy/.cache
+data_dir = /var/lib/mopidy/.local/share/mopidy
+
+[audio]
+output = audioresample ! audioconvert ! audio/x-raw,rate=48000,channels=2,format=S16LE ! queue ! filesink location=${MOPIDY_FIFO}
+
+[file]
+media_dirs = /media/music
+
+[local]
+enabled = true
+media_dir = /media/music
+
+[spotify]
+enabled = true
+username = ${SPOTIFY_USERNAME}
+password = ${SPOTIFY_PASSWORD}
+client_id = ${SPOTIFY_CLIENT_ID}
+client_secret = ${SPOTIFY_CLIENT_SECRET}
+
+[iris]
+enabled = true
+country = US
+```
+
+Mount your actual library into `data/mopidy` (or adjust `media_dirs`), feed Spotify credentials via the Mopidy container environment/secrets if you use that backend, and swap the output line if you prefer ALSA direct. The point: keep Mopidy’s config in git-friendly plain text so future-you understands why the audio graph works.
 
 ### 2. Light the stack
 
@@ -307,26 +325,28 @@ Lay these in right after basic bring-up so you never have to wonder who can whis
 
 *(Translate to your firewall syntax: e.g., `set firewall name LAN-IN rule 10 action accept ...` on VyOS, or `ufw allow from 192.168.50.0/24 to any port 53 proto tcp` on Ubuntu.)*
 
+### Tailscale container onboarding
+
+Once the container is up, hop in and light it up:
+
+```bash
+docker exec -it tailscale \
+  tailscale up \
+  --authkey ${TAILSCALE_AUTHKEY} \
+  --hostname ${ORIN_HOSTNAME}-tailscale \
+  --advertise-tags=tag:admin,tag:automation \
+  --accept-dns=false \
+  --reset
+```
+
+- **Auth keys:** use ephemeral keys when you can (`tskey-ephemeral-...`) so the node evaporates if the container rebuilds before you notice.
+- **Hostname tags:** the compose file already binds `/var/lib/tailscale`, so re-using a hostname keeps the node identity stable; the `--advertise-tags` line matches the ACL example below.
+- **Exit nodes:** skip `--exit-node` unless you’re intentionally hairpinning. This stack wants local LAN latency, not tailnet detours.
+- **DNS:** we hand out Pi-hole via tailnet DNS already, so `--accept-dns=false` keeps the container from overriding its own resolver.
+
 ### Tailscale ACL snippet
 
-```json
-{
-  "acls": [
-    { "action": "accept", "src": ["tag:admin", "group:ops"], "dst": ["orin-core:22", "orin-core:8123", "orin-core:1780", "orin-core:8081"] },
-    { "action": "accept", "src": ["tag:display"], "dst": ["orin-core:8123"] },
-    { "action": "accept", "src": ["tag:automation"], "dst": ["orin-core:1883"] }
-  ],
-  "dns": {
-    "magicDNS": true,
-    "nameservers": [ { "ip": "100.x.y.z" } ],
-    "overrideLocalDNS": true,
-    "searchDomains": ["homeauto.tail"]
-  },
-  "nodeAttrs": [
-    { "target": ["tag:admin"], "attr": [{"key": "allow-ssh", "value": "true"}] }
-  ]
-}
-```
+The repo now ships [`tailscale-acl.example.json`](./tailscale-acl.example.json). Drop it into the Tailscale admin console’s ACL editor, swap hostnames/IPs for your world, and commit. It captures the same intent as before—admin boxes can SSH/HA/Snapweb, display panels only get HA, automation boxes get MQTT.
 
 - Tag every box that should reach Orin (`tailscale tag set admin orin-core`).
 - Use tailnet DNS → Pi-hole so remote devices resolve your LAN hostnames without leaking queries.
@@ -349,6 +369,13 @@ Lay these in right after basic bring-up so you never have to wonder who can whis
 - For REAPER, enable **Web Remote** + **OSC** on the Mac; Node-RED/HA call your custom actions.
 - Vivint via **HACS** provides entities and RTSP modes; scope TTS to rooms with **snapcast.snapshot/restore**.
 - Start simple: get one stream + one room working, then add the rest.
+
+## When things crackle (troubleshooting crib sheet)
+
+- **Snapcast FIFOs yelling about permissions:** the bootstrap script leaves FIFOs as world-writable `mkfifo` artifacts. If Docker remaps them on you, nuke and re-run `./scripts/bootstrap-volumes.sh`, or `sudo chown root:audio /path/to/fifo && chmod 660` so host-mode containers can write.
+- **ALSA device bingo:** list cards with `arecord -l` on the host (or inside the Mopidy/librespot containers with `docker exec -it mopidy arecord -l`). Match the `hw:X,Y` value with `VINYL_ALSA_DEV` and double-check the container has `--device /dev/snd` exposed.
+- **Audio still stutters?** Tail the logs from the sound stack: `docker logs -f snapserver`, `docker logs -f mopidy`, and `docker logs -f librespot`. Crackling often means sample-rate mismatch—confirm Mopidy/librespot are hitting the Snapcast FIFOs at the same rate set in Snapserver.
+- **Tailscale weirdness:** `docker exec -it tailscale tailscale status --peers` shows whether the node is actually on the tailnet. If it’s missing routes, rerun the `tailscale up` command with `--force-reauth`.
 
 ---
 
@@ -437,7 +464,3 @@ automation:
 ```
 
 Bonus move: drop the `studio/reaper/ack` topic into a Lovelace Markdown card so you can see who punched the cue last.
-
----
-
-_Last updated: 2025‑09‑05_
