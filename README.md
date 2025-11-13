@@ -42,6 +42,12 @@ Tired of translating diagrams into YAML by hand? Same. The new [`docker-compose.
 
 ### 0. Prime a `.env`
 
+Start by copying the new [`.env.example`](./.env.example) into place and then riffing on it:
+
+```bash
+cp .env.example .env
+```
+
 Copy the variable table above into a `.env` next to the compose file. Here’s a starter that matches the map notation:
 
 ```dotenv
