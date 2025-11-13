@@ -1,0 +1,77 @@
+[
+  {
+    "id": "printer_state_in",
+    "type": "mqtt in",
+    "z": "orchestra",
+    "name": "Printer state",
+    "topic": "octoprint/+/state",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_local",
+    "x": 140,
+    "y": 320,
+    "wires": [["tag_printer"]]
+  },
+  {
+    "id": "tag_printer",
+    "type": "function",
+    "z": "orchestra",
+    "name": "build dashboard payload",
+    "func": "const topic = msg.topic.split('/');\nconst printer = topic[1];\nconst state = msg.payload.state;\nmsg.payload = {\n  printer,\n  state,\n  progress: msg.payload.progress || 0\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 320,
+    "wires": [["dash_update", "print_complete"]]
+  },
+  {
+    "id": "dash_update",
+    "type": "ui_table",
+    "z": "orchestra",
+    "group": "printer_group",
+    "name": "Printer matrix",
+    "order": 1,
+    "width": 12,
+    "height": 6,
+    "columns": [
+      {"field": "printer", "title": "Printer", "width": "", "align": "left"},
+      {"field": "state", "title": "State", "width": "", "align": "center"},
+      {"field": "progress", "title": "%", "width": "", "align": "right"}
+    ],
+    "outputs": 0,
+    "cts": true,
+    "x": 650,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "print_complete",
+    "type": "switch",
+    "z": "orchestra",
+    "name": "Finished jobs",
+    "property": "payload.state",
+    "propertyType": "msg",
+    "rules": [{"t": "eq", "v": "Operational", "vt": "str"}],
+    "checkall": "true",
+    "repair": false,
+    "x": 640,
+    "y": 360,
+    "wires": [["confetti"]]
+  },
+  {
+    "id": "confetti",
+    "type": "mqtt out",
+    "z": "orchestra",
+    "name": "Publish finish topic",
+    "topic": "studio/printers/finished",
+    "qos": "1",
+    "retain": "false",
+    "broker": "mqtt_local",
+    "x": 880,
+    "y": 360,
+    "wires": []
+  }
+]
