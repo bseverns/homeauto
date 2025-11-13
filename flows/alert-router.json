@@ -1,0 +1,95 @@
+[
+  {
+    "id": "frigate_in",
+    "type": "mqtt in",
+    "z": "orchestra",
+    "name": "Frigate events",
+    "topic": "frigate/events",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_local",
+    "nl": false,
+    "rap": true,
+    "inputs": 0,
+    "x": 140,
+    "y": 120,
+    "wires": [["people_only"]]
+  },
+  {
+    "id": "people_only",
+    "type": "switch",
+    "z": "orchestra",
+    "name": "just people",
+    "property": "payload.after.label",
+    "propertyType": "msg",
+    "rules": [{"t": "eq", "v": "person", "vt": "str"}],
+    "checkall": "true",
+    "repair": false,
+    "x": 360,
+    "y": 120,
+    "wires": [["snapshot", "prep_tts"]]
+  },
+  {
+    "id": "snapshot",
+    "type": "change",
+    "z": "orchestra",
+    "name": "set snapshot topic",
+    "rules": [
+      {"t": "set", "p": "payload", "pt": "msg", "to": "on", "tot": "str"}
+    ],
+    "x": 620,
+    "y": 80,
+    "wires": [["snap_warn"]]
+  },
+  {
+    "id": "snap_warn",
+    "type": "mqtt out",
+    "z": "orchestra",
+    "name": "warn light",
+    "topic": "studio_dn/warning_light/set",
+    "qos": "1",
+    "retain": "false",
+    "broker": "mqtt_local",
+    "x": 860,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "prep_tts",
+    "type": "change",
+    "z": "orchestra",
+    "name": "payload -> message",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"message\":\"Heads up: movement in Studio Downstairs.\",\"cache\":false,\"entity_id\":\"media_player.snap_studio_dn\"}",
+        "tot": "json"
+      }
+    ],
+    "x": 630,
+    "y": 160,
+    "wires": [["ha_tts"]]
+  },
+  {
+    "id": "ha_tts",
+    "type": "api-call-service",
+    "z": "orchestra",
+    "name": "HA TTS -> Snapcast",
+    "server": "ha_ws",
+    "version": 5,
+    "debugenabled": false,
+    "service_domain": "tts",
+    "service": "speak",
+    "entityId": "tts.piper_en_us",
+    "dataType": "json",
+    "mergecontext": "",
+    "mustacheAltTags": false,
+    "output_location": "",
+    "output_location_type": "none",
+    "x": 880,
+    "y": 160,
+    "wires": [[]]
+  }
+]

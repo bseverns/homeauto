@@ -1,0 +1,80 @@
+[
+  {
+    "id": "cue_in",
+    "type": "mqtt in",
+    "z": "orchestra",
+    "name": "Cue topic",
+    "topic": "studio/reaper/cue",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "mqtt_local",
+    "x": 140,
+    "y": 520,
+    "wires": [["format_cue"]]
+  },
+  {
+    "id": "format_cue",
+    "type": "change",
+    "z": "orchestra",
+    "name": "Build OSC payload",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"url\":\"http://macpro.local:8080/_osc\",\"method\":\"post\",\"body\":{\"address\":\"/marker/next\",\"args\":[{\"type\":\"i\",\"value\":0}]}}",
+        "tot": "json"
+      }
+    ],
+    "x": 380,
+    "y": 520,
+    "wires": [["http_post", "ack"]]
+  },
+  {
+    "id": "http_post",
+    "type": "http request",
+    "z": "orchestra",
+    "name": "Fire OSC-over-HTTP",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "persist": false,
+    "authType": "",
+    "senderr": false,
+    "x": 660,
+    "y": 500,
+    "wires": [[]]
+  },
+  {
+    "id": "ack",
+    "type": "change",
+    "z": "orchestra",
+    "name": "Set ack",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"status\":\"cue_sent\",\"ts\":$moment().format(),\"cue\":msg.topic}",
+        "tot": "jsonata"
+      }
+    ],
+    "x": 630,
+    "y": 560,
+    "wires": [["cue_ack"]]
+  },
+  {
+    "id": "cue_ack",
+    "type": "mqtt out",
+    "z": "orchestra",
+    "name": "Ack topic",
+    "topic": "studio/reaper/ack",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt_local",
+    "x": 880,
+    "y": 560,
+    "wires": []
+  }
+]
