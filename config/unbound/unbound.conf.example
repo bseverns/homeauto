@@ -1,0 +1,52 @@
+# Unbound rides shotgun for Pi-hole. Keep it lean, validating, and metadata shy.
+# Mirrors the best-practice notes in README §6.
+
+server:
+    verbosity: 1
+    interface: 127.0.0.1
+    interface: ::1
+    port: 5335
+    do-daemonize: no
+    username: "_unbound"
+    directory: "/opt/unbound/etc/unbound"
+    chroot: ""
+    use-syslog: yes
+    logfile: ""
+
+    # DNSSEC + minimisation staples.
+    auto-trust-anchor-file: "/opt/unbound/etc/unbound/root.key"
+    root-hints: "/opt/unbound/etc/unbound/root.hints"
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+    qname-minimisation: yes
+    aggressive-nsec: yes
+    val-clean-additional: yes
+
+    # Keep the noise floor low.
+    hide-identity: yes
+    hide-version: yes
+    unwanted-reply-threshold: 10000
+    prefetch: yes
+    prefetch-key: yes
+    minimal-responses: yes
+
+    # LAN + tailnet clients are allowed through fragments in conf.d.
+    access-control: 127.0.0.0/8 allow
+    access-control: ::1 allow
+
+    # IPv6 stays on even if your LAN is still v4-only.
+    do-ip6: yes
+    do-ip4: yes
+
+    # Sensible cache sizing for the Jetson (tweak as you like).
+    msg-cache-size: 100m
+    rrset-cache-size: 200m
+    cache-min-ttl: 300
+    cache-max-ttl: 86400
+
+    so-rcvbuf: 4m
+    so-sndbuf: 4m
+
+include: "/opt/unbound/etc/unbound/conf.d/*.conf"

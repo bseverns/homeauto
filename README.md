@@ -78,6 +78,8 @@ Most services persist to `./data` or `./config`. Instead of the mega-`mkdir`, le
 The script is idempotent and safe to rerun; it creates every bind-mounted directory, peeks at `.env` for `MOPIDY_FIFO` and `LIBRESPOT_FIFO`, and drops in Snapcast-ready named pipes (or defaults to `./data/snapcast/fifo/snapfifo_*`).
 If you point those FIFO vars at `/tmp` or some other haunt, the script will happily chase them down and make the pipes there too.
 
+It also seeds **Unbound**’s starter config under [`config/unbound/`](./config/unbound). The main file is [`unbound.conf`](./config/unbound/unbound.conf) and the fragments in [`conf.d/`](./config/unbound/conf.d) carry the access-control and optional forward-zone stubs. Hack on those when you want to change who can query the resolver or where it forwards instead of root walking.
+
 ### 2. Light the stack
 
 ```bash
@@ -335,6 +337,7 @@ Lay these in right after basic bring-up so you never have to wonder who can whis
 - Bind Pi-hole to **LAN + Tailscale** interfaces only (`Settings → DNS → Interface listening behavior → Listen on all interfaces, permit only listed clients`).
 - Lock Unbound to localhost (`interface: 127.0.0.1` and optionally the Tailscale IP if you run split DNS).
 - Enable **DNSSEC** and **QNAME minimisation** inside `unbound.conf` to shred metadata.
+- Default config lives at `config/unbound/unbound.conf`; ACL and forwarder overrides sit in `config/unbound/conf.d/*.conf`. Copy/paste the examples, then keep Pi-hole’s upstream pinned to `127.0.0.1#5335`.
 - Populate Pi-hole’s **Conditional Forwarding** with your router’s subnet only if you absolutely need reverse lookups; otherwise, keep queries local.
 - Create an allow-list of client subnets (LAN + tailnet) and drop everything else (`pihole -a -iL "192.168.50.0/24,100.64.0.0/10"`).
 - Monitor Pi-hole audit logs and port hits via your firewall—unexpected chatter means something’s phoning home.

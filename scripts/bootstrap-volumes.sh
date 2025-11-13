@@ -11,7 +11,6 @@ required_dirs=(
   "data/mosquitto/log"
   "data/pihole/etc-pihole"
   "data/pihole/etc-dnsmasq.d"
-  "data/unbound"
   "data/snapcast/config"
   "data/snapcast/fifo"
   "data/mopidy"
@@ -19,6 +18,8 @@ required_dirs=(
   "data/octofarm"
   "data/tailscale"
   "data/portainer"
+  "config/unbound"
+  "config/unbound/conf.d"
   "config/mopidy"
 )
 
@@ -36,6 +37,30 @@ for dir in "${required_dirs[@]}"; do
     printf '  • %s (created)\n' "${dir}"
   fi
 done
+
+seed_template() {
+  local src_rel="$1"
+  local dst_rel="$2"
+  local src="${ROOT_DIR}/${src_rel}"
+  local dst="${ROOT_DIR}/${dst_rel}"
+
+  if [[ -f "${dst}" ]]; then
+    printf '  • %s (kept existing)\n' "${dst_rel}"
+    return
+  fi
+
+  if [[ -f "${src}" ]]; then
+    cp "${src}" "${dst}"
+    printf '  • %s (seeded from %s)\n' "${dst_rel}" "${src_rel}"
+  else
+    printf '  • %s (skipped: missing template %s)\n' "${dst_rel}" "${src_rel}" >&2
+  fi
+}
+
+printf '\n➤ Seeding Unbound config (non-destructive)...\n'
+seed_template "config/unbound/unbound.conf.example" "config/unbound/unbound.conf"
+seed_template "config/unbound/conf.d/access-control.conf.example" "config/unbound/conf.d/access-control.conf"
+seed_template "config/unbound/conf.d/forward-zones.conf.example" "config/unbound/conf.d/forward-zones.conf"
 
 declare -A env_map
 ENV_FILE="${ROOT_DIR}/.env"
