@@ -83,7 +83,7 @@ services:
     environment:
       <<: *default-env
     volumes:
-      - ./data/unbound:/opt/unbound/etc/unbound
+      - ./config/unbound:/opt/unbound/etc/unbound
 
   snapserver:
     image: jcorporation/snapcast:latest
