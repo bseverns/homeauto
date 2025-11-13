@@ -137,6 +137,42 @@ flowchart LR
   HA2 -- "snapcast.restore" --> DIN
 ```
 
+### Hardware cheat-sheet (keep it loud, keep it clean)
+
+| Room vibe | Snapclient class | DAC → Amp pairing | Notes |
+|---|---|---|---|
+| Studio downstairs | Pi 4 + PoE hat | Hifiberry DAC2 Pro → Fosi V3 | Balanced-ish, add a fan if you’re running tubes nearby. |
+| Dining | Thin client (HP T630) | SMSL Sanskrit 10th MKII → Audioengine N22 | USB-powered DAC keeps wiring short; stick felt pads on the amp so it doesn’t skateboard off the buffet. |
+| Studio upstairs | Jetson Nano | Topping D10s → Crown XLS 1002 | D10s exposes bit-perfect USB, Crown does the muscle; feed balanced TRS from the Crown to nearfields. |
+
+**Wiring mantra:** keep USB cables ≤1 m, run balanced wherever the amp allows, and ground-loop isolators are cheaper than hunting a mystery hum at 2 AM.
+
+### ALSA device discovery riffs
+
+- `aplay -l` → list playback hardware cards (your DACs). Run it on each snapclient host after plugging the DAC. Note the `card,device` tuple for Snapcast configs.
+- `arecord -l` → same idea for capture devices; that’s how you find the vinyl ADC before you point `ffmpeg` at `hw:1,0` or similar.
+- `cat /proc/asound/cards` → quick sanity check that the kernel even sees your gear.
+- `ffmpeg -f alsa -list_devices true -i dummy` → verbose dump of ALSA names; clutch when the `hw:` shortcut fails.
+- `alsactl store` after you dial in mixer gains so reboot gremlins don’t nuke your levels.
+
+### FIFO / TCP latency troubleshooting (vinyl line-in edition)
+
+1. **Measure first.** From any Snapclient box run `snapclient --latency` and note the ms. You’re hunting drift, not feelings.
+2. **FIFO back-pressure:**
+   - If vinyl audio arrives late, peek at `sudo lsof /tmp/snapfifo_vinyl` (or whatever you named it). If writers outnumber readers, you’re stalled.
+   - Bump Snapserver’s `buffer` per stream (e.g., `"buffer": 2000` in `snapserver.conf`) then re-test. Too high and group sync lags.
+3. **TCP push tuning (riff on that `ffmpeg` command from §4):**
+   - Add `-fflags +nobuffer -flags low_delay -flush_packets 1` to the vinyl sender:
+     ```bash
+     ffmpeg -re -fflags +nobuffer -flags low_delay -flush_packets 1 \
+       -f alsa -ac 2 -ar 48000 -i hw:1,0 \
+       -f s16le tcp://ORIN_IP:1704
+     ```
+   - Still laggy? Drop `-re` so ffmpeg shoves frames as fast as they appear, and watch CPU.
+   - If packets choke, slide over to RTP: `-f rtp rtp://ORIN_IP:5004` and point Snapserver’s stream at that port (latency drops, but you’ll need firewall love).
+4. **Clock slips:** USB ADCs love to wander. Pin them to a powered hub, or graduate to an interface that exposes Word Clock / SPDIF and slave everything.
+5. **Room-specific offsets:** Last mile fix—use `snapclient --setlatency <ms>` per host to nudge the straggler forward or back.
+
 ---
 
 ## 4) Minimal bring-up checklist
