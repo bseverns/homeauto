@@ -1,9 +1,6 @@
 # Jetson-Orchestrated Home & Studio — Option C System Map
 
 *A living map of the network, audio fabric, automations, and edges.*  
-**Paste this whole file into your repo/wiki/Obsidian.** Mermaid diagrams are in fenced code blocks like ` ```mermaid `.
-
-> **Tip:** If your viewer doesn’t render Mermaid, install a Mermaid plugin (e.g., VS Code “Markdown Preview Mermaid Support”) or use https://mermaid.live to preview each block.
 
 ---
 
