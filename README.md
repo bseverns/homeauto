@@ -4,6 +4,15 @@
 
 ---
 
+## Start here
+
+New to the stack? Grab the short, reliable contracts first, then dive into the long-form map.
+
+- [`atlas/interop.yaml`](./atlas/interop.yaml) — interop surfaces, stable IDs, and invariants.
+- [`docs/FIELD_CARD.md`](./docs/FIELD_CARD.md) — fast field guide: bring-up, ports, and fixes.
+
+---
+
 ## Quick legend
 
 - **ORIN** = Jetson Orin Nano (“the conductor”) near router/NAS.  
