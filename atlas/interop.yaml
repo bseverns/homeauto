@@ -1,0 +1,52 @@
+repo_role: implementation
+
+owned_ids:
+  - node-red.flow.alert_router: [frigate_in, people_only, snapshot, snap_warn, prep_tts, ha_tts]
+  - node-red.flow.printer_truth_table: [printer_state_in, tag_printer, dash_update, print_complete, confetti]
+  - node-red.flow.reaper_cue_launcher: [cue_in, format_cue, http_post, ack, cue_ack]
+
+interfaces:
+  ports:
+    - { name: home_assistant, port: 8123, protocol: http }
+    - { name: node_red, port: 1880, protocol: http }
+    - { name: mqtt, port: 1883, protocol: tcp }
+    - { name: mqtt_ws, port: 9001, protocol: ws }
+    - { name: pihole_dns, port: 53, protocol: tcp/udp }
+    - { name: unbound, port: 5335, protocol: tcp/udp }
+    - { name: snapserver_stream, port: 1704, protocol: tcp }
+    - { name: snapweb, port: 1780, protocol: http }
+    - { name: octofarm, port: 4000, protocol: http }
+    - { name: portainer, port: 9000, protocol: http }
+    - { name: portainer_tls, port: 9443, protocol: https }
+  urls:
+    - http://$ORIN_IP:8123
+    - http://$ORIN_IP:1880
+    - http://$ORIN_IP:1780
+    - http://$ORIN_IP:4000
+    - http://$ORIN_IP/admin
+  protocols:
+    - mqtt
+    - http
+    - osc
+    - snapcast
+
+emits_consumes:
+  mqtt:
+    consumes:
+      - frigate/events
+      - octoprint/+/state
+      - studio/reaper/cue
+    emits:
+      - studio/printers/finished
+      - studio/reaper/ack
+      - studio_dn/warning_light/set
+  osc:
+    consumes:
+      - reaper:custom-addresses (via Node-RED HTTP/OSC bridge)
+  midi: []
+
+invariants:
+  - Snapserver + Mopidy + librespot + vinyl ingest stay on host networking for FIFO/ALSA latency.
+  - FIFO paths from MOPIDY_FIFO + LIBRESPOT_FIFO are the stable audio handoff points.
+  - DNS stack remains Pi-hole → Unbound on localhost with LAN/tailnet-only exposure.
+  - If a shared contract is needed later, reference systems-atlas/contracts instead of duplicating it here.
