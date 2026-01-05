@@ -1,0 +1,36 @@
+# Assistant ingest config — small, explicit, predictable.
+# This file is read by services/assistant/ingest/ingest.py
+
+roots:
+  - /data/docs
+  - /data/config
+  - /data/scripts
+  - /data/flows
+
+# File extensions we will treat as text.
+extensions:
+  - .md
+  - .txt
+  - .py
+  - .sh
+  - .yml
+  - .yaml
+  - .json
+  - .toml
+  - .env
+  - .ini
+  - .cfg
+  - .js
+  - .ts
+  - .tsx
+  - .sql
+
+# Chunking controls (characters, not tokens).
+chunk_size: 1000
+chunk_overlap: 150
+
+# Max file size to ingest (bytes).
+max_bytes: 2000000
+
+# Optional tag to attach to all records (useful when indexing multiple stacks).
+collection_tag: homeauto

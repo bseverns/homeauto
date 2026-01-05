@@ -10,6 +10,7 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 
 - [`atlas/interop.yaml`](./atlas/interop.yaml) — interop surfaces, stable IDs, and invariants.
 - [`docs/FIELD_CARD.md`](./docs/FIELD_CARD.md) — fast field guide: bring-up, ports, and fixes.
+- [`docs/assistant/README.md`](./docs/assistant/README.md) — the always-on local assistant (LLM + RAG) that stays on the Orin.
 
 ---
 
@@ -123,6 +124,27 @@ docker compose up -d
 - Snapweb on `http://$ORIN_IP:1780` for group/stream wiring.
 
 Once the stack is up, the rest of this README still functions as your north star—automations, audio routing, Vivint glue, all unchanged.
+
+---
+
+## Local assistant (LLM + RAG on the Orin)
+
+Want a codex‑ish assistant that never leaves your LAN? The stack now includes an **optional assistant profile**: Qdrant + llama.cpp + a tiny API service + a one‑shot ingest job. All local, all yours.
+
+Start it like this:
+
+```bash
+docker compose --profile assistant up -d qdrant llama-server assistant-api
+docker compose --profile assistant run --rm assistant-ingest
+```
+
+Then ask questions straight from the terminal:
+
+```bash
+./scripts/ask "How is the Snapcast audio graph wired?"
+```
+
+Field notes live here: [`docs/assistant/README.md`](./docs/assistant/README.md).
 
 ---
 

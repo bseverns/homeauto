@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+API_URL="${ASSISTANT_API_URL:-http://localhost:7070/query}"
+
+usage() {
+  cat <<USAGE
+Usage: ask "your question" [--explain] [--top-k N]
+
+Examples:
+  ask "How does the Snapcast FIFO flow work?"
+  ask --explain "Where is the Unbound config seeded?"
+
+Options:
+  --explain   Include source snippets in the response.
+  --top-k N   How many chunks to retrieve (default: 6).
+USAGE
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+explain=false
+top_k=6
+question=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --explain)
+      explain=true
+      shift
+      ;;
+    --top-k)
+      top_k="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      question+=("$1")
+      shift
+      ;;
+  esac
+done
+
+question_text="${question[*]}"
+
+if [[ -z "${question_text}" ]]; then
+  usage
+  exit 1
+fi
+
+payload=$(cat <<JSON
+{
+  "question": "${question_text}",
+  "top_k": ${top_k},
+  "explain": ${explain}
+}
+JSON
+)
+
+curl -sS -X POST "${API_URL}" \
+  -H 'Content-Type: application/json' \
+  -d "${payload}"
+
+printf '\n'
