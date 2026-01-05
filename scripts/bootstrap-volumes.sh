@@ -18,9 +18,12 @@ required_dirs=(
   "data/octofarm"
   "data/tailscale"
   "data/portainer"
+  "data/assistant/qdrant"
+  "data/assistant/models"
   "config/unbound"
   "config/unbound/conf.d"
   "config/mopidy"
+  "config/assistant"
 )
 
 trim() {
