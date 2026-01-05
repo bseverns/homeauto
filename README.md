@@ -18,7 +18,7 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 
 - **ORIN** = Jetson Orin Nano (“the conductor”) near router/NAS.  
 - **NANO‑A** = Frigate/vision edge.  
-- **NANO‑B** = Print edge (OctoPrint host for at least one printer).  
+- **MAC‑MINI** = Mac Mini A1347 (main printer host / OctoPrint + friends).  
 - **Rooms** = Snapcast clients (Studio downstairs, Dining, Studio upstairs).  
 - **Your Router/Firewall** = your own downstream router; C4000XG is in Transparent Bridge.
 
@@ -118,7 +118,7 @@ docker compose up -d
 
 - `http://$ORIN_IP:8123` → Home Assistant onboarding.
 - `http://$ORIN_IP:1880` → Node-RED flows (drop in your OSC/HTTP bridges).
-- `http://$ORIN_IP:4000` → OctoFarm, point it at NANO-B and OctoPi nodes.
+- `http://$ORIN_IP:4000` → OctoFarm, point it at MAC‑MINI and OctoPi nodes.
 - `http://$ORIN_IP/admin` → Pi-hole (DNS upstream already chained to Unbound).
 - `tailscale status` inside the container once you `docker exec -it tailscale tailscale up`.
 - Snapweb on `http://$ORIN_IP:1780` for group/stream wiring.
@@ -161,7 +161,7 @@ flowchart LR
   SWITCH --> NAS["NAS / Files"]
   SWITCH --> MACPRO["Mac Pro 3,1 (REAPER)"]
   SWITCH --> NANO_A["Jetson NANO-A (Frigate)"]
-  SWITCH --> NANO_B["Jetson NANO-B (OctoPrint host)"]
+  SWITCH --> MACMINI["Mac Mini A1347 (main printer host)<br/>OctoPrint + friends"]
   SWITCH --> OCTOPI["OctoPi / Klipper nodes<br/>Printers #2/#3"]
   SWITCH --> ROOMS["Snapclients in rooms<br/>(Studio DN, Dining, Studio UP)"]
 
@@ -212,7 +212,7 @@ flowchart TD
 
   OFARM <--> HA
   OFARM <--> MQTT
-  NANO_B2["OctoPrint host"] -- "API + MQTT" --> OFARM
+  MACMINI2["Mac Mini A1347 (OctoPrint host)"] -- "API + MQTT" --> OFARM
   OCTOPI2["OctoPi / Klipper nodes"] -- "OctoPrint or Moonraker" --> OFARM
 
   NANO_A2["Frigate"] -- "RTSP detections -> MQTT" --> MQTT
