@@ -10,13 +10,17 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 
 - [`atlas/interop.yaml`](./atlas/interop.yaml) — interop surfaces, stable IDs, and invariants.
 - [`docs/FIELD_CARD.md`](./docs/FIELD_CARD.md) — fast field guide: bring-up, ports, and fixes.
-- [`docs/assistant/README.md`](./docs/assistant/README.md) — the always-on local assistant (LLM + RAG) that stays on the Orin.
+- [`docs/assistant/README.md`](./docs/assistant/README.md) — the always-on local assistant (LLM + RAG) that stays on CORE (formerly Orin).
+- [`docs/TURING_PI_2_BASE_STATION.md`](./docs/TURING_PI_2_BASE_STATION.md) — role-based base station guide for Turing Pi 2 (single-node + split).
+- [`docs/TURING_PI_2_FIELD_CARD.md`](./docs/TURING_PI_2_FIELD_CARD.md) — one-page Turing Pi field reference.
+- [`docs/HARDWARE_PROFILES.md`](./docs/HARDWARE_PROFILES.md) — map hardware to roles and swap machines without rewriting the plan.
 
 ---
 
 ## Quick legend
 
-- **ORIN** = Jetson Orin Nano (“the conductor”) near router/NAS.  
+- **CORE** = the conductor (role name). Formerly called **ORIN**.  
+- **ORIN** = legacy nickname for the CORE box (still works in env vars).  
 - **NANO‑A** = Frigate/vision edge.  
 - **MAC‑MINI** = Mac Mini A1347 (main printer host / OctoPrint + friends).  
 - **Rooms** = Snapcast clients (Studio downstairs, Dining, Studio upstairs).  
@@ -26,26 +30,44 @@ You’ll customize IPs, names, and ports below.
 
 ---
 
+## Role-based language (new, additive, reversible)
+
+Hardware is interchangeable; **roles** are not. From here on out:
+
+- **CORE** is the role that used to be called **ORIN**.
+- `ORIN_*` env vars still work as compatibility aliases.
+- New docs and compose slices talk in **CORE / HISTORY / VISION / EXPERIMENTS** terms.
+
+This keeps the stack stable while you move hardware around like a synth rack.
+
+---
+
 ## Variables (fill these once)
 
 | Name | Example | Meaning |
 |---|---|---|
-| `ORIN_HOSTNAME` | `orin-core` | Linux hostname for the Orin |
-| `ORIN_IP` | `192.168.50.50` | Static LAN IP for Orin |
+| `CORE_HOSTNAME` | `core` | Linux hostname for the CORE role |
+| `CORE_IP` | `192.168.50.50` | Static LAN IP for CORE |
+| `ORIN_HOSTNAME` | `orin-core` | Legacy alias (optional; keep in sync with CORE) |
+| `ORIN_IP` | `192.168.50.50` | Legacy alias (optional; keep in sync with CORE) |
 | `ROUTER_LAN` | `192.168.50.0/24` | LAN subnet |
-| `ROUTER_DNS_V4` | `192.168.50.50` | DNS handed to clients (Pi-hole on Orin) |
+| `ROUTER_DNS_V4` | `192.168.50.50` | DNS handed to clients (Pi-hole on CORE) |
 | `ROUTER_DNS_V6` | `fd00::50` | v6 DNS (optional) |
 | `MOPIDY_FIFO` | `/tmp/snapfifo_music` | FIFO for Mopidy → Snapcast |
 | `LIBRESPOT_FIFO` | `/tmp/snapfifo_spotify` | FIFO for librespot → Snapcast |
 | `VINYL_ALSA_DEV` | `hw:1,0` | ALSA device for USB ADC |
 | `SNAPWEB_PORT` | `1780` | Snapserver web UI port |
 | `HA_URL` | `http://homeassistant.local:8123` | Home Assistant URL |
+| `AUDIO_HOST` | `audio-node` | Optional hostname for audio slice |
+| `AUDIO_IP` | `192.168.50.61` | Optional static IP for audio host |
+| `ASSISTANT_HOST` | `assistant-node` | Optional hostname for assistant node |
+| `ASSISTANT_API_URL` | `http://192.168.50.62:7070` | Optional assistant API endpoint |
 
 ---
 
 ## Compose stack: straight from the map
 
-Tired of translating diagrams into YAML by hand? Same. The new [`docker-compose.yml`](./docker-compose.yml) is a faithful mirror of the Option C map—no mystery containers, no "lol just install later". Drop it on the Orin (or Portainer stack it) and you get the whole conductor bundle in one punch.
+Tired of translating diagrams into YAML by hand? Same. The new [`docker-compose.yml`](./docker-compose.yml) is a faithful mirror of the Option C map—no mystery containers, no "lol just install later". Drop it on the CORE box (still compatible with the old ORIN env vars) and you get the whole conductor bundle in one punch.
 
 ### 0. Prime a `.env`
 
@@ -127,7 +149,7 @@ Once the stack is up, the rest of this README still functions as your north star
 
 ---
 
-## Local assistant (LLM + RAG on the Orin)
+## Local assistant (LLM + RAG on CORE)
 
 Want a codex‑ish assistant that never leaves your LAN? The stack now includes an **optional assistant profile**: Qdrant + llama.cpp + a tiny API service + a one‑shot ingest job. All local, all yours.
 
@@ -376,7 +398,7 @@ docker exec -it tailscale \
 
 The repo now ships [`tailscale-acl.example.json`](./tailscale-acl.example.json). Drop it into the Tailscale admin console’s ACL editor, swap hostnames/IPs for your world, and commit. It captures the same intent as before—admin boxes can SSH/HA/Snapweb, display panels only get HA, automation boxes get MQTT.
 
-- Tag every box that should reach Orin (`tailscale tag set admin orin-core`).
+- Tag every box that should reach CORE (`tailscale tag set admin orin-core`).
 - Use tailnet DNS → Pi-hole so remote devices resolve your LAN hostnames without leaking queries.
 - Reject everything else by default; only ship the ports you actually monitor.
 

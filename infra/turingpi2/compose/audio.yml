@@ -1,0 +1,81 @@
+version: "3.9"
+
+x-default-env: &default-env
+  TZ: "${TZ:-UTC}"
+
+services:
+  snapserver:
+    image: jcorporation/snapcast:latest
+    container_name: audio-snapserver
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+    volumes:
+      - ../data/snapcast/config:/etc/snapserver
+      - type: bind
+        source: ../data/snapcast/fifo
+        target: /var/lib/snapserver
+
+  mopidy:
+    image: wernight/mopidy:latest
+    container_name: audio-mopidy
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      PULSE_SERVER: "unix:/tmp/pulse-native"
+    volumes:
+      - ../data/mopidy:/var/lib/mopidy
+      - ../data/mopidy-config:/etc/mopidy
+      - type: bind
+        source: ${MOPIDY_FIFO:-../data/snapcast/fifo/snapfifo_music}
+        target: /tmp/snapfifo_music
+    depends_on:
+      - snapserver
+
+  librespot:
+    image: librespotorg/librespot:latest
+    container_name: audio-librespot
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      <<: *default-env
+      LIBRESPOT_NAME: "${CORE_HOSTNAME:-${ORIN_HOSTNAME:-core}}-spotify"
+      LIBRESPOT_BITRATE: "320"
+      LIBRESPOT_CACHE: "/cache"
+      LIBRESPOT_BACKEND: pipe
+      LIBRESPOT_DEVICE: /tmp/snapfifo_spotify
+    volumes:
+      - ../data/librespot/cache:/cache
+      - type: bind
+        source: ${LIBRESPOT_FIFO:-../data/snapcast/fifo/snapfifo_spotify}
+        target: /tmp/snapfifo_spotify
+    depends_on:
+      - snapserver
+    command: >-
+      --name "${CORE_HOSTNAME:-${ORIN_HOSTNAME:-core}}-spotify"
+      --backend pipe
+      --device /tmp/snapfifo_spotify
+      --bitrate 320
+      --enable-volume-normalisation
+      --cache /cache
+
+  vinyl_ingest:
+    image: linuxserver/ffmpeg:latest
+    container_name: audio-vinyl-ingest
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    environment:
+      <<: *default-env
+    devices:
+      - "${VINYL_ALSA_DEV:-/dev/snd}:/dev/snd"
+    command: >-
+      -hide_banner -loglevel warning
+      -f alsa -i ${VINYL_ALSA_DEV}
+      -ac 2 -ar 48000 -f s16le tcp://${CORE_IP:-${ORIN_IP:-127.0.0.1}}:1704
+    depends_on:
+      - snapserver
+
+volumes: {}

@@ -1,7 +1,7 @@
 version: "3.9"
 
-# Jetson Orin core stack from the Option C system map.
-# Drop a `.env` beside this file with at least TZ, ORIN_IP, ROUTER_DNS_V4, ROUTER_DNS_V6, MOPIDY_FIFO, LIBRESPOT_FIFO, VINYL_ALSA_DEV.
+# CORE stack from the Option C system map (formerly labeled ORIN).
+# Drop a `.env` beside this file with at least TZ, CORE_IP/ORIN_IP, ROUTER_DNS_V4, ROUTER_DNS_V6, MOPIDY_FIFO, LIBRESPOT_FIFO, VINYL_ALSA_DEV.
 
 x-shared-env: &default-env
   TZ: "${TZ:-UTC}"
@@ -57,7 +57,7 @@ services:
     network_mode: host
     environment:
       <<: *default-env
-      FTLCONF_LOCAL_IPV4: "${ORIN_IP}"
+      FTLCONF_LOCAL_IPV4: "${CORE_IP:-${ORIN_IP}}"
       PIHOLE_DNS_: "127.0.0.1#5335"
       WEBPASSWORD: "${PIHOLE_PASSWORD:-change-me}"
       DNSMASQ_LISTENING: all
@@ -122,7 +122,7 @@ services:
     network_mode: host
     environment:
       <<: *default-env
-      LIBRESPOT_NAME: "${ORIN_HOSTNAME:-orin}-spotify"
+      LIBRESPOT_NAME: "${CORE_HOSTNAME:-${ORIN_HOSTNAME:-orin}}-spotify"
       LIBRESPOT_BITRATE: "320"
       LIBRESPOT_CACHE: "/cache"
       LIBRESPOT_BACKEND: pipe
@@ -135,7 +135,7 @@ services:
     depends_on:
       - snapserver
     command: >-
-      --name "${ORIN_HOSTNAME:-orin}-spotify"
+      --name "${CORE_HOSTNAME:-${ORIN_HOSTNAME:-orin}}-spotify"
       --backend pipe
       --device /tmp/snapfifo_spotify
       --bitrate 320
@@ -155,7 +155,7 @@ services:
     command: >-
       -hide_banner -loglevel warning
       -f alsa -i ${VINYL_ALSA_DEV}
-      -ac 2 -ar 48000 -f s16le tcp://${ORIN_IP:-127.0.0.1}:1704
+      -ac 2 -ar 48000 -f s16le tcp://${CORE_IP:-${ORIN_IP:-127.0.0.1}}:1704
     depends_on:
       - snapserver
 
