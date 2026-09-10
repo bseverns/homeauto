@@ -266,6 +266,7 @@ services:
       - ./config:/data/config:ro
       - ./scripts:/data/scripts:ro
       - ./flows:/data/flows:ro
+      - ./coordination:/data/coordination:ro
     command: ["python", "/app/ingest.py"]
     depends_on:
       - qdrant

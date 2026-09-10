@@ -1,3 +1,5 @@
 /data/
 /config/mopidy/
+/coordination/state/
+__pycache__/
 .DS_Store

@@ -1,0 +1,540 @@
+#!/usr/bin/env python3
+"""Build a bounded local view of BenLab reports and human directives."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import re
+import sys
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = ROOT / "coordination" / "sources.json"
+DIRECTIVES_DIR = ROOT / "coordination" / "directives"
+TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
+ACTION_TYPES = (
+    "review_candidate",
+    "promote_candidate",
+    "refresh_report",
+    "assess_capacity",
+    "propose_schedule",
+    "repo_action",
+    "note",
+)
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else (ROOT / path).resolve()
+
+
+def source_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+    path = resolve_path(spec["path"])
+    result = {
+        "name": name,
+        "available": path.is_file(),
+        "configured_path": spec["path"],
+        "authority": spec.get("authority", ""),
+    }
+    if path.is_file():
+        result["modified_at"] = datetime.fromtimestamp(
+            path.stat().st_mtime, timezone.utc
+        ).isoformat()
+    return result
+
+
+def summarize_benlab(path: Path) -> dict[str, Any]:
+    payload = read_json(path)
+    contract = payload.get("contract", {})
+    if contract.get("name") != "benlab-actions":
+        raise ValueError("BenLab export is not a benlab-actions contract")
+
+    actions_by_project = {
+        action.get("project"): action
+        for action in payload.get("actions", [])
+        if action.get("project")
+    }
+
+    def queue(name: str) -> list[dict[str, Any]]:
+        rows = []
+        for project in payload.get("queues", {}).get(name, []):
+            action = actions_by_project.get(project, {})
+            rows.append(
+                {
+                    "project": project,
+                    "attention": action.get("attention_state", name),
+                    "next_action": action.get("next_action"),
+                    "effort": action.get("next_action_effort"),
+                    "energy_fit": action.get("energy_fit"),
+                    "stack": action.get("next_action_stack") or [],
+                    "route": action.get("next_action_route"),
+                }
+            )
+        return rows
+
+    return {
+        "generated_at": payload.get("generated_at"),
+        "contract": contract,
+        "attention_budget": payload.get("attention_budget", {}),
+        "now": queue("now"),
+        "next": queue("next"),
+        "sleeping_count": len(payload.get("sleeping", [])),
+    }
+
+
+def summarize_analyst(path: Path, limit: int = 8) -> dict[str, Any]:
+    payload = read_json(path)
+    promotions = payload.get("promotions", [])
+    statuses = Counter(
+        item.get("promotion_recommendation", {}).get("status", "unspecified")
+        for item in promotions
+    )
+    recent = sorted(
+        promotions,
+        key=lambda item: item.get("created_unix") or 0,
+        reverse=True,
+    )[:limit]
+    # Deliberately exclude source_path, evidence bodies, and full card content.
+    candidates = []
+    for item in recent:
+        recommendation = item.get("promotion_recommendation", {})
+        intake = item.get("benlab_intake", {})
+        candidates.append(
+            {
+                "card_id": item.get("card_id"),
+                "working_title": item.get("working_title"),
+                "recommendation": recommendation.get("status"),
+                "promotion_target": recommendation.get("promotion_target"),
+                "suggested_route": intake.get("suggested_route"),
+                "suggested_next_step": intake.get("suggested_next_step"),
+                "estimated_effort": intake.get("estimated_effort"),
+                "public_safety_status": intake.get("public_safety_status"),
+            }
+        )
+    return {
+        "generated_at": payload.get("generated_at"),
+        "contract_version": payload.get("contract_version"),
+        "candidate_count": len(promotions),
+        "recommendation_counts": dict(sorted(statuses.items())),
+        "recent_candidates": candidates,
+    }
+
+
+def summarize_capacity(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    fields = (
+        "project",
+        "attention",
+        "next_action",
+        "effort",
+        "energy_fit",
+        "stack",
+        "route",
+        "block_date",
+        "block_start",
+        "block_end",
+        "buffer_minutes",
+    )
+    today = datetime.now().astimezone().date()
+    fits = []
+    for row in rows:
+        fit = {field: row.get(field) for field in fields}
+        try:
+            block_date = datetime.strptime(row.get("block_date", ""), "%Y-%m-%d").date()
+            fit["temporal_status"] = (
+                "elapsed" if block_date < today else "today" if block_date == today else "upcoming"
+            )
+        except ValueError:
+            fit["temporal_status"] = "unknown"
+        fits.append(fit)
+    return {
+        "fit_count": len(rows),
+        "fits": fits,
+    }
+
+
+def summarize_freshness(path: Path) -> dict[str, Any]:
+    payload = read_json(path)
+    artifacts = payload.get("artifacts", [])
+    statuses = Counter(item.get("status", "unknown") for item in artifacts)
+    warnings = [
+        {
+            "path": item.get("path"),
+            "status": item.get("status"),
+            "warning": item.get("warning"),
+        }
+        for item in artifacts
+        if item.get("warning")
+    ]
+    return {
+        "generated_at": payload.get("generated_at"),
+        "status_counts": dict(sorted(statuses.items())),
+        "warnings": warnings,
+    }
+
+
+def validate_directive(payload: dict[str, Any], source: Path) -> list[str]:
+    errors = []
+    required = {
+        "contract_version",
+        "id",
+        "created_at",
+        "authority",
+        "status",
+        "target",
+        "action_type",
+        "instruction",
+        "requires_confirmation",
+        "source_refs",
+        "constraints",
+    }
+    missing = sorted(required - payload.keys())
+    if missing:
+        errors.append(f"missing fields: {', '.join(missing)}")
+    if payload.get("contract_version") != 1:
+        errors.append("contract_version must be 1")
+    if payload.get("authority") != "human":
+        errors.append("authority must be human")
+    if payload.get("target") not in TARGETS:
+        errors.append("unknown target")
+    if payload.get("action_type") not in ACTION_TYPES:
+        errors.append("unknown action_type")
+    if payload.get("status") not in {
+        "draft", "approved", "dispatched", "completed", "cancelled"
+    }:
+        errors.append("unknown status")
+    if payload.get("requires_confirmation") is not True:
+        errors.append("requires_confirmation must be true")
+    if not str(payload.get("instruction", "")).strip():
+        errors.append("instruction must not be empty")
+    return [f"{source.name}: {error}" for error in errors]
+
+
+def load_directives(directory: Path = DIRECTIVES_DIR) -> tuple[list[dict[str, Any]], list[str]]:
+    directives = []
+    errors = []
+    if not directory.exists():
+        return directives, errors
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = read_json(path)
+            file_errors = validate_directive(payload, path)
+            if file_errors:
+                errors.extend(file_errors)
+            else:
+                directives.append(payload)
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path.name}: {exc}")
+    return directives, errors
+
+
+def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+    config = read_json(config_path)
+    specs = config.get("sources", {})
+    statuses = {name: source_status(name, spec) for name, spec in specs.items()}
+    warnings = []
+
+    def load_summary(name: str, loader: Any) -> dict[str, Any] | None:
+        status = statuses.get(name, {})
+        if not status.get("available"):
+            warnings.append(f"Missing source: {name} ({status.get('configured_path')})")
+            return None
+        try:
+            return loader(resolve_path(specs[name]["path"]))
+        except (OSError, ValueError, KeyError, csv.Error, json.JSONDecodeError) as exc:
+            warnings.append(f"Could not read {name}: {exc}")
+            return None
+
+    directives, directive_errors = load_directives()
+    warnings.extend(directive_errors)
+    snapshot = {
+        "contract": {
+            "name": "benlab-operator-snapshot",
+            "schema_version": "1.0.0",
+            "authority": "read-only aggregation plus human-authored directives",
+        },
+        "generated_at": utc_now(),
+        "sources": statuses,
+        "benlab": load_summary("benlab_actions", summarize_benlab),
+        "analyst": load_summary("analyst_promotions", summarize_analyst),
+        "schedule": {
+            "capacity": load_summary("schedule_capacity", summarize_capacity),
+            "freshness": load_summary("schedule_freshness", summarize_freshness),
+        },
+        "directives": directives,
+        "warnings": warnings,
+        "boundaries": [
+            "Analyst candidates are not commitments.",
+            "Only BenLab owns attention and project commitment.",
+            "Capacity fit is not a scheduled calendar event.",
+            "Directives require human confirmation and are not auto-dispatched.",
+        ],
+    }
+    return snapshot
+
+
+def cell(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, list):
+        value = ", ".join(str(item) for item in value)
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def render_dashboard(snapshot: dict[str, Any]) -> str:
+    lines = [
+        "# BenLab operator dashboard",
+        "",
+        f"Generated: `{snapshot['generated_at']}`",
+        "",
+        "> Read-only orientation surface. Analyst candidates are not commitments; capacity",
+        "> fits are not calendar events; directives are inert until explicitly reviewed.",
+        "",
+        "## Source health",
+        "",
+        "| Source | Available | Source generated | File modified (UTC) |",
+        "| --- | --- | --- | --- |",
+    ]
+    generated = {
+        "benlab_actions": (snapshot.get("benlab") or {}).get("generated_at"),
+        "analyst_promotions": (snapshot.get("analyst") or {}).get("generated_at"),
+        "schedule_freshness": (
+            snapshot.get("schedule", {}).get("freshness") or {}
+        ).get("generated_at"),
+    }
+    for name, status in snapshot["sources"].items():
+        lines.append(
+            f"| {cell(name)} | {cell(status['available'])} | "
+            f"{cell(generated.get(name))} | {cell(status.get('modified_at'))} |"
+        )
+
+    benlab = snapshot.get("benlab")
+    lines.extend(["", "## BenLab attention", ""])
+    if not benlab:
+        lines.append("BenLab actions are unavailable.")
+    else:
+        budget = benlab.get("attention_budget", {})
+        lines.append(
+            f"Attention budget within bounds: **{cell(budget.get('within_budget'))}**. "
+            f"Sleeping projects: **{benlab.get('sleeping_count', 0)}**."
+        )
+        for queue_name in ("now", "next"):
+            lines.extend(
+                [
+                    "",
+                    f"### {queue_name.title()}",
+                    "",
+                    "| Project | Action | Effort | Stack | Route |",
+                    "| --- | --- | --- | --- | --- |",
+                ]
+            )
+            for item in benlab.get(queue_name, []):
+                lines.append(
+                    f"| {cell(item['project'])} | {cell(item['next_action'])} | "
+                    f"{cell(item['effort'])} | {cell(item['stack'])} | {cell(item['route'])} |"
+                )
+
+    capacity = snapshot.get("schedule", {}).get("capacity")
+    lines.extend(["", "## Capacity fit", ""])
+    if not capacity:
+        lines.append("Capacity assessment is unavailable.")
+    else:
+        lines.extend(
+            [
+                "| Project | Fit window | Timing | Effort | Energy | Action |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in capacity.get("fits", []):
+            block = f"{item.get('block_start', '')} – {item.get('block_end', '')}"
+            lines.append(
+                f"| {cell(item.get('project'))} | {cell(block)} | {cell(item.get('temporal_status'))} | {cell(item.get('effort'))} | "
+                f"{cell(item.get('energy_fit'))} | {cell(item.get('next_action'))} |"
+            )
+        if not capacity.get("fits"):
+            lines.append("| — | — | — | — | — | No current fit rows |")
+
+    analyst = snapshot.get("analyst")
+    lines.extend(["", "## Recent Analyst candidates", ""])
+    if not analyst:
+        lines.append("Analyst promotions are unavailable.")
+    else:
+        lines.append(
+            f"Total candidates: **{analyst['candidate_count']}**. Recommendation counts: "
+            f"`{json.dumps(analyst['recommendation_counts'], sort_keys=True)}`."
+        )
+        lines.extend(
+            [
+                "",
+                "| Card | Working title | Recommendation | Route | Suggested next step |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in analyst.get("recent_candidates", []):
+            lines.append(
+                f"| {cell(item.get('card_id'))} | {cell(item.get('working_title'))} | "
+                f"{cell(item.get('recommendation'))} | {cell(item.get('suggested_route'))} | "
+                f"{cell(item.get('suggested_next_step'))} |"
+            )
+
+    lines.extend(["", "## Open directives", ""])
+    open_directives = [
+        item
+        for item in snapshot.get("directives", [])
+        if item.get("status") not in {"completed", "cancelled"}
+    ]
+    if not open_directives:
+        lines.append("No open directives.")
+    else:
+        lines.extend(
+            [
+                "| ID | Status | Target | Type | Instruction |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in open_directives:
+            lines.append(
+                f"| {cell(item.get('id'))} | {cell(item.get('status'))} | "
+                f"{cell(item.get('target'))} | {cell(item.get('action_type'))} | "
+                f"{cell(item.get('instruction'))} |"
+            )
+
+    freshness = snapshot.get("schedule", {}).get("freshness") or {}
+    all_warnings = list(snapshot.get("warnings", []))
+    all_warnings.extend(
+        f"{item.get('path')}: {item.get('warning')}"
+        for item in freshness.get("warnings", [])
+    )
+    lines.extend(["", "## Warnings", ""])
+    if all_warnings:
+        lines.extend(f"- {warning}" for warning in all_warnings)
+    else:
+        lines.append("No source or freshness warnings.")
+
+    lines.extend(["", "## Boundaries", ""])
+    lines.extend(f"- {boundary}" for boundary in snapshot.get("boundaries", []))
+    return "\n".join(lines) + "\n"
+
+
+def output_paths(config_path: Path) -> tuple[Path, Path]:
+    config = read_json(config_path)
+    outputs = config.get("outputs", {})
+    return resolve_path(outputs["snapshot"]), resolve_path(outputs["dashboard"])
+
+
+def write_snapshot(config_path: Path) -> tuple[Path, Path, dict[str, Any]]:
+    snapshot = build_snapshot(config_path)
+    snapshot_path, dashboard_path = output_paths(config_path)
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
+    dashboard_path.write_text(render_dashboard(snapshot), encoding="utf-8")
+    return snapshot_path, dashboard_path, snapshot
+
+
+def slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")[:48] or "action"
+
+
+def create_directive(
+    directory: Path,
+    target: str,
+    instruction: str,
+    action_type: str,
+    rationale: str = "",
+    source_refs: list[str] | None = None,
+    constraints: list[str] | None = None,
+) -> Path:
+    now = datetime.now(timezone.utc)
+    directive_id = f"directive-{now.strftime('%Y%m%d-%H%M%S')}-{slugify(instruction)}"
+    path = directory / f"{directive_id}.json"
+    counter = 2
+    while path.exists():
+        path = directory / f"{directive_id}-{counter}.json"
+        counter += 1
+    payload = {
+        "contract_version": 1,
+        "id": path.stem,
+        "created_at": now.isoformat(),
+        "authority": "human",
+        "status": "draft",
+        "target": target,
+        "action_type": action_type,
+        "instruction": instruction.strip(),
+        "rationale": rationale.strip(),
+        "requires_confirmation": True,
+        "source_refs": source_refs or [],
+        "constraints": constraints or [],
+        "outcome": None,
+    }
+    errors = validate_directive(payload, path)
+    if errors:
+        raise ValueError("; ".join(errors))
+    directory.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("refresh", help="write the local snapshot and dashboard")
+    subparsers.add_parser("status", help="print a fresh dashboard without writing it")
+    create = subparsers.add_parser("new-directive", help="create an inert draft directive")
+    create.add_argument("target", choices=TARGETS)
+    create.add_argument("instruction")
+    create.add_argument("--type", choices=ACTION_TYPES, default="note", dest="action_type")
+    create.add_argument("--rationale", default="")
+    create.add_argument("--source", action="append", default=[], dest="source_refs")
+    create.add_argument("--constraint", action="append", default=[], dest="constraints")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    config_path = args.config.expanduser().resolve()
+    if args.command == "refresh":
+        snapshot_path, dashboard_path, snapshot = write_snapshot(config_path)
+        freshness_warnings = (
+            snapshot.get("schedule", {}).get("freshness") or {}
+        ).get("warnings", [])
+        print(f"snapshot: {snapshot_path}")
+        print(f"dashboard: {dashboard_path}")
+        print(f"warnings: {len(snapshot['warnings']) + len(freshness_warnings)}")
+        return 0
+    if args.command == "status":
+        print(render_dashboard(build_snapshot(config_path)), end="")
+        return 0
+    if args.command == "new-directive":
+        path = create_directive(
+            DIRECTIVES_DIR,
+            args.target,
+            args.instruction,
+            args.action_type,
+            args.rationale,
+            args.source_refs,
+            args.constraints,
+        )
+        print(path)
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

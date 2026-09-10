@@ -12,6 +12,7 @@ Creates a timestamped backup archive in ops/backup/out/ containing:
 - config/ (service configs)
 - data/ (root compose data)
 - infra/roles/data/ (role-slice data)
+- coordination/directives/ (operator-authored directives)
 - docker-compose.yml
 - .env (if present)
 
@@ -36,6 +37,7 @@ paths=(
   "config"
   "data"
   "infra/roles/data"
+  "coordination/directives"
   "docker-compose.yml"
 )
 

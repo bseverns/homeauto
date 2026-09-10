@@ -14,6 +14,7 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 - [`docs/ROLE_BASED_DEPLOYMENT.md`](./docs/ROLE_BASED_DEPLOYMENT.md) — current Orin + Intel Mac mini deployment guide.
 - [`docs/ROLE_BASED_FIELD_CARD.md`](./docs/ROLE_BASED_FIELD_CARD.md) — one-page operations reference for the two-host setup.
 - [`docs/HARDWARE_PROFILES.md`](./docs/HARDWARE_PROFILES.md) — map hardware to roles and swap machines without rewriting the plan.
+- [`coordination/README.md`](./coordination/README.md) — local console for BenLab, Analyst, and schedule-assessment reports and directives.
 
 ---
 

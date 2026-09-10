@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://benlab.local/schemas/operator-directive.schema.json",
+  "title": "BenLab operator directive",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "id",
+    "created_at",
+    "authority",
+    "status",
+    "target",
+    "action_type",
+    "instruction",
+    "requires_confirmation",
+    "source_refs",
+    "constraints"
+  ],
+  "properties": {
+    "contract_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^directive-[a-z0-9-]+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "authority": { "const": "human" },
+    "status": {
+      "enum": ["draft", "approved", "dispatched", "completed", "cancelled"]
+    },
+    "target": {
+      "enum": ["benlab", "benlab-local-analyst", "schedule-assessment", "homeauto"]
+    },
+    "action_type": {
+      "enum": [
+        "review_candidate",
+        "promote_candidate",
+        "refresh_report",
+        "assess_capacity",
+        "propose_schedule",
+        "repo_action",
+        "note"
+      ]
+    },
+    "instruction": { "type": "string", "minLength": 1 },
+    "rationale": { "type": "string" },
+    "requires_confirmation": { "const": true },
+    "source_refs": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "outcome": { "type": ["string", "null"] }
+  }
+}
