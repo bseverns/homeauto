@@ -2,7 +2,8 @@
 
 This stack is role-first: **CORE, HISTORY, VISION, EXPERIMENTS** are jobs, not machines. You can swap hardware under them without rewriting the whole world.
 
-Use this as a quick “what could run where” map. Mix and match as your bench and budget allow.
+Use this as the current deployment map. The repo assumes the Orin and at least one
+16 GB Intel Mac mini are available; it does not assume a cluster chassis.
 
 ## Roles (what they do)
 
@@ -11,16 +12,16 @@ Use this as a quick “what could run where” map. Mix and match as your bench 
 - **VISION** — heavy video or ML workloads (Frigate, object detection, NVR stuff).
 - **EXPERIMENTS** — optional side quests: LLMs, RAG, OCR, custom automations.
 
-## Example hardware mappings
+## Current hardware mapping
 
 | Hardware | Suggested role(s) | Why this fits |
 | --- | --- | --- |
-| **Turing Pi 2 + CM4 nodes** | CORE + HISTORY + EXPERIMENTS (split) | Low power, clustered, flexible. CORE stays light; EXPERIMENTS can die without taking the house with it. |
-| **Jetson Orin Nano** | CORE or VISION | Strong GPU. Great as CORE *or* as a VISION node with Frigate + detectors. |
-| **Jetson Nano / Xavier NX** | VISION | Solid edge inference for cameras. |
-| **x86 mini PC (NUC, Beelink, etc.)** | HISTORY + EXPERIMENTS | Fast storage + plenty of RAM for databases, LLMs, and indexing. |
-| **Mac Mini A1347** | HISTORY (printer host + OctoPrint) | Already in the stack for printers; keep it doing one job well. |
-| **Raspberry Pi 4 / CM4** | AUDIO clients, small service host | Cheap, replaceable. Good for snapclients, small APIs, or a single service. |
+| **Jetson Orin** | CORE + VISION | The always-on automation host and the best available target for camera inference or other GPU work. |
+| **Intel Mac mini (16 GB)** | HISTORY + printer host + EXPERIMENTS | Suitable for databases, backups, OctoPrint, indexing, and CPU-friendly services that should be isolated from CORE. |
+
+If more than one Mac mini is online, keep printer USB workloads on one and move
+HISTORY/EXPERIMENTS to another. With one Mac mini, prioritize printer hosting and
+backups before optional experiments.
 
 ## Human rule of thumb
 

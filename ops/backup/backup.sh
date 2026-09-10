@@ -11,7 +11,7 @@ Usage: ops/backup/backup.sh [--help]
 Creates a timestamped backup archive in ops/backup/out/ containing:
 - config/ (service configs)
 - data/ (root compose data)
-- infra/turingpi2/data/ (Turing Pi slice data)
+- infra/roles/data/ (role-slice data)
 - docker-compose.yml
 - .env (if present)
 
@@ -35,7 +35,7 @@ archive="${OUT_DIR}/homeauto-backup-${stamp}.tar.gz"
 paths=(
   "config"
   "data"
-  "infra/turingpi2/data"
+  "infra/roles/data"
   "docker-compose.yml"
 )
 

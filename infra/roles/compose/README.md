@@ -1,4 +1,4 @@
-# Turing Pi 2 compose slices (modular + mean)
+# Role-based compose slices
 
 These files are **role slices** — small, composable chunks you can run on any node.
 Run only what you need; scale out when the hardware shows up.
@@ -6,7 +6,7 @@ Run only what you need; scale out when the hardware shows up.
 ## Layout
 
 ```
-infra/turingpi2/
+infra/roles/
   compose/
     core.yml        # CORE services (HA + MQTT + Node-RED + proxy)
     audio.yml       # Snapserver + Mopidy + librespot + vinyl ingest
@@ -19,21 +19,21 @@ infra/turingpi2/
 ### CORE
 
 ```bash
-docker compose -f infra/turingpi2/compose/core.yml up -d
+docker compose -f infra/roles/compose/core.yml up -d
 ```
 
 ### Audio slice
 
 ```bash
-docker compose -f infra/turingpi2/compose/audio.yml up -d
+docker compose -f infra/roles/compose/audio.yml up -d
 ```
 
 ### Assistant slice
 
 ```bash
-docker compose -f infra/turingpi2/compose/assistant.yml up -d
+docker compose -f infra/roles/compose/assistant.yml up -d
 # one-shot ingest run
-# docker compose -f infra/turingpi2/compose/assistant.yml run --rm assistant-ingest
+# docker compose -f infra/roles/compose/assistant.yml run --rm assistant-ingest
 ```
 
 ## Combine slices
@@ -43,8 +43,8 @@ as needed:
 
 ```bash
 docker compose \
-  -f infra/turingpi2/compose/core.yml \
-  -f infra/turingpi2/compose/audio.yml \
+  -f infra/roles/compose/core.yml \
+  -f infra/roles/compose/audio.yml \
   up -d
 ```
 
@@ -52,10 +52,15 @@ docker compose \
 
 - Use `.env` at repo root. This keeps env shared across slices.
 - `CORE_*` is the new naming; `ORIN_*` still works as a compatibility fallback.
-- For audio, the FIFO defaults live under `infra/turingpi2/data/snapcast/fifo/` unless
+- For audio, the FIFO defaults live under `infra/roles/data/snapcast/fifo/` unless
   you point `MOPIDY_FIFO` or `LIBRESPOT_FIFO` somewhere else.
 
 ## Intent (teach the future)
 
 This is a **role-first** deployment. Hardware is interchangeable; roles are not.
 Keep CORE boring. Let experiments explode on their own node.
+
+The current two-host mapping is:
+
+- **Jetson Orin**: CORE, VISION, and hardware-accelerated workloads.
+- **Intel Mac mini (16 GB)**: HISTORY, printer hosting, and optional CPU-friendly EXPERIMENTS.

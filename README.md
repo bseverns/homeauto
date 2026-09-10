@@ -11,8 +11,8 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 - [`atlas/interop.yaml`](./atlas/interop.yaml) — interop surfaces, stable IDs, and invariants.
 - [`docs/FIELD_CARD.md`](./docs/FIELD_CARD.md) — fast field guide: bring-up, ports, and fixes.
 - [`docs/assistant/README.md`](./docs/assistant/README.md) — the always-on local assistant (LLM + RAG) that stays on CORE (formerly Orin).
-- [`docs/TURING_PI_2_BASE_STATION.md`](./docs/TURING_PI_2_BASE_STATION.md) — role-based base station guide for Turing Pi 2 (single-node + split).
-- [`docs/TURING_PI_2_FIELD_CARD.md`](./docs/TURING_PI_2_FIELD_CARD.md) — one-page Turing Pi field reference.
+- [`docs/ROLE_BASED_DEPLOYMENT.md`](./docs/ROLE_BASED_DEPLOYMENT.md) — current Orin + Intel Mac mini deployment guide.
+- [`docs/ROLE_BASED_FIELD_CARD.md`](./docs/ROLE_BASED_FIELD_CARD.md) — one-page operations reference for the two-host setup.
 - [`docs/HARDWARE_PROFILES.md`](./docs/HARDWARE_PROFILES.md) — map hardware to roles and swap machines without rewriting the plan.
 
 ---
@@ -22,7 +22,7 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 - **CORE** = the conductor (role name). Formerly called **ORIN**.  
 - **ORIN** = legacy nickname for the CORE box (still works in env vars).  
 - **NANO‑A** = Frigate/vision edge.  
-- **MAC‑MINI** = Mac Mini A1347 (main printer host / OctoPrint + friends).  
+- **MAC‑MINI** = an available 16 GB Intel Mac mini (printer host, HISTORY, and optional EXPERIMENTS).
 - **Rooms** = Snapcast clients (Studio downstairs, Dining, Studio upstairs).  
 - **Your Router/Firewall** = your own downstream router; C4000XG is in Transparent Bridge.
 
@@ -40,6 +40,13 @@ Hardware is interchangeable; **roles** are not. From here on out:
 
 This keeps the stack stable while you move hardware around like a synth rack.
 
+### Current equipment assignment
+
+There is no cluster chassis in the current inventory. The **Jetson Orin** owns CORE
+and is the preferred VISION/GPU host. At least one **16 GB Intel Mac mini** is
+available for HISTORY, OctoPrint, backups, and CPU-friendly EXPERIMENTS. See the
+[deployment guide](./docs/ROLE_BASED_DEPLOYMENT.md) for the operational split.
+
 ---
 
 ## Variables (fill these once)
@@ -50,6 +57,8 @@ This keeps the stack stable while you move hardware around like a synth rack.
 | `CORE_IP` | `192.168.50.50` | Static LAN IP for CORE |
 | `ORIN_HOSTNAME` | `orin-core` | Legacy alias (optional; keep in sync with CORE) |
 | `ORIN_IP` | `192.168.50.50` | Legacy alias (optional; keep in sync with CORE) |
+| `HISTORY_HOST` | `macmini-history` | 16 GB Intel Mac mini hostname |
+| `HISTORY_IP` | `192.168.50.60` | Static LAN IP for the Mac mini |
 | `ROUTER_LAN` | `192.168.50.0/24` | LAN subnet |
 | `ROUTER_DNS_V4` | `192.168.50.50` | DNS handed to clients (Pi-hole on CORE) |
 | `ROUTER_DNS_V6` | `fd00::50` | v6 DNS (optional) |
@@ -58,10 +67,10 @@ This keeps the stack stable while you move hardware around like a synth rack.
 | `VINYL_ALSA_DEV` | `hw:1,0` | ALSA device for USB ADC |
 | `SNAPWEB_PORT` | `1780` | Snapserver web UI port |
 | `HA_URL` | `http://homeassistant.local:8123` | Home Assistant URL |
-| `AUDIO_HOST` | `audio-node` | Optional hostname for audio slice |
-| `AUDIO_IP` | `192.168.50.61` | Optional static IP for audio host |
-| `ASSISTANT_HOST` | `assistant-node` | Optional hostname for assistant node |
-| `ASSISTANT_API_URL` | `http://192.168.50.62:7070` | Optional assistant API endpoint |
+| `AUDIO_HOST` | `orin-core` | Audio slice host; defaults to the Orin |
+| `AUDIO_IP` | `192.168.50.50` | Static IP for the audio host |
+| `ASSISTANT_HOST` | `macmini-history` | Optional assistant host; defaults to the Mac mini |
+| `ASSISTANT_API_URL` | `http://192.168.50.60:7070` | Optional assistant API endpoint |
 
 ---
 
@@ -183,7 +192,7 @@ flowchart LR
   SWITCH --> NAS["NAS / Files"]
   SWITCH --> MACPRO["Mac Pro 3,1 (REAPER)"]
   SWITCH --> NANO_A["Jetson NANO-A (Frigate)"]
-  SWITCH --> MACMINI["Mac Mini A1347 (main printer host)<br/>OctoPrint + friends"]
+  SWITCH --> MACMINI["Intel Mac mini, 16 GB (HISTORY + printer host)<br/>OctoPrint, backups, optional experiments"]
   SWITCH --> OCTOPI["OctoPi / Klipper nodes<br/>Printers #2/#3"]
   SWITCH --> ROOMS["Snapclients in rooms<br/>(Studio DN, Dining, Studio UP)"]
 
@@ -234,7 +243,7 @@ flowchart TD
 
   OFARM <--> HA
   OFARM <--> MQTT
-  MACMINI2["Mac Mini A1347 (OctoPrint host)"] -- "API + MQTT" --> OFARM
+  MACMINI2["Intel Mac mini, 16 GB (OctoPrint host)"] -- "API + MQTT" --> OFARM
   OCTOPI2["OctoPi / Klipper nodes"] -- "OctoPrint or Moonraker" --> OFARM
 
   NANO_A2["Frigate"] -- "RTSP detections -> MQTT" --> MQTT

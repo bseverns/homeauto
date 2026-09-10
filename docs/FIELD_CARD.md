@@ -29,7 +29,7 @@ Run these right after you boot the stack. If these fail, stop and fix before you
 | Snapserver stream | 1704 | TCP | Snapcast audio stream ingress. |
 | Pi-hole admin | 80 | HTTP | `http://$ORIN_IP/admin`. |
 | Unbound | 5335 | TCP/UDP | DNS upstream for Pi-hole. |
-| OctoFarm | 4000 | HTTP | Printer fleet dashboard (points at the Mac Mini A1347 printer host). |
+| OctoFarm | 4000 | HTTP | Printer fleet dashboard (points at the 16 GB Intel Mac mini printer host). |
 | Portainer | 9000 / 9443 | HTTP/HTTPS | Container UI. |
 
 ## Topology in 6 lines (text mode for field ops)
@@ -41,7 +41,7 @@ Run these right after you boot the stack. If these fail, stop and fix before you
 - **Router** hands out ORIN as DNS so everything resolves locally.
 
 ## Printer host reality check (aka: where the plastic actually melts)
-The **Mac Mini A1347** is the main printer server now. That means:
+The **16 GB Intel Mac mini** is the main printer server now. That means:
 - **OctoPrint lives on the Mac Mini**, not on a Jetson edge.
 - **OctoFarm on ORIN talks to the Mac Mini** (and any OctoPi/Klipper sidecars).
 - If prints stall, start troubleshooting on the Mac Mini first — it’s the heartbeat for the printer fleet.
@@ -49,10 +49,10 @@ The **Mac Mini A1347** is the main printer server now. That means:
 This isn’t a theoretical diagram thing; it’s the real wiring. Keep it honest so future-you doesn’t spelunk in the wrong box at 2 a.m.
 
 ## Printer field kit — bootstrapping OctoFarm + OctoPrint like you mean it
-This is the practical, punchy starter kit to get the **Mac Mini A1347 + OctoFarm + OctoPrint** workflow alive.
+This is the practical, punchy starter kit to get the **Intel Mac mini + OctoFarm + OctoPrint** workflow alive.
 Treat it like a checklist you can riff on, not a rigid ritual.
 
-### 1) Mac Mini A1347: the printer host brain
+### 1) Intel Mac mini (16 GB): the printer host brain
 **Intent:** put OctoPrint where the USB lives, and keep it boring on purpose.
 
 - **Install OctoPrint** on the Mac Mini (native app, container, or system service — pick the method you actually maintain).
