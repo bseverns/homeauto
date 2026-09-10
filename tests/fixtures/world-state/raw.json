@@ -1,0 +1,53 @@
+{
+  "contract": {"name": "homeauto-raw-telemetry", "schema_version": "1.0.0"},
+  "collected_at": "2026-09-10T15:00:00+00:00",
+  "sources": [
+    {
+      "source": {"kind": "home_assistant", "name": "homeassistant"},
+      "observed_at": "2026-09-10T14:59:30+00:00",
+      "freshness_seconds": 120,
+      "sensitivity": "household",
+      "confidence": 1.0,
+      "payload": [
+        {"entity_id": "binary_sensor.studio_motion", "state": "on", "last_updated": "2026-09-10T14:59:30+00:00"}
+      ]
+    },
+    {
+      "source": {"kind": "mqtt", "name": "mosquitto"},
+      "observed_at": "2026-09-10T14:59:50+00:00",
+      "freshness_seconds": 120,
+      "sensitivity": "household",
+      "confidence": 0.8,
+      "payload": [
+        {"topic": "octoprint/mk3s/state", "payload": {"state": "Printing", "progress": 42}}
+      ]
+    },
+    {
+      "source": {"kind": "service", "name": "docker-compose"},
+      "observed_at": "2026-09-10T15:00:00+00:00",
+      "freshness_seconds": 120,
+      "sensitivity": "internal",
+      "confidence": 1.0,
+      "payload": [
+        {"name": "homeassistant", "state": "running"},
+        {"name": "mosquitto", "state": "exited"}
+      ]
+    },
+    {
+      "source": {"kind": "system", "name": "collector-host"},
+      "observed_at": "2026-09-10T15:00:00+00:00",
+      "freshness_seconds": 120,
+      "sensitivity": "internal",
+      "confidence": 1.0,
+      "payload": {"disk_used_percent": 91.0, "load_1m": 1.2}
+    },
+    {
+      "source": {"kind": "coordination", "name": "operator-snapshot"},
+      "observed_at": "2026-09-10T12:00:00+00:00",
+      "freshness_seconds": 900,
+      "sensitivity": "private",
+      "confidence": 1.0,
+      "payload": {"generated_at": "2026-09-10T12:00:00+00:00", "warnings": [], "directives": []}
+    }
+  ]
+}

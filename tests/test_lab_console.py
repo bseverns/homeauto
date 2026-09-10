@@ -75,6 +75,22 @@ class LabConsoleTests(unittest.TestCase):
                 "schedule": {"capacity": None, "freshness": None},
                 "directives": [],
                 "warnings": [],
+                "world_state": {
+                    "situations": [
+                        {
+                            "id": "system-health",
+                            "label": "System health",
+                            "state": "healthy",
+                            "confidence": 1.0,
+                            "rule": "all observed services are running",
+                            "evidence": ["service:homeassistant"],
+                            "why": ["homeassistant is running"],
+                        }
+                    ],
+                    "boundaries": [
+                        "World state is read-only and does not create, approve, or dispatch directives."
+                    ],
+                },
                 "boundaries": [
                     "Analyst candidates are not commitments.",
                     "Capacity fit is not a scheduled calendar event.",
@@ -83,6 +99,8 @@ class LabConsoleTests(unittest.TestCase):
         )
         self.assertIn("Analyst candidates are not commitments", dashboard)
         self.assertIn("Capacity fit is not a scheduled calendar event", dashboard)
+        self.assertIn("## World situations", dashboard)
+        self.assertIn("Why?", dashboard)
 
 
 if __name__ == "__main__":

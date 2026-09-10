@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "world-state.schema.json",
+  "title": "Homeauto interpreted world state",
+  "type": "object",
+  "required": ["contract", "generated_at", "observations", "situations", "boundaries"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "required": ["name", "schema_version", "authority"],
+      "properties": {
+        "name": {"const": "homeauto-world-state"},
+        "schema_version": {"const": "1.0.0"},
+        "authority": {"const": "read-only; no control actions"}
+      }
+    },
+    "generated_at": {"type": "string", "format": "date-time"},
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "observed_at", "freshness", "sensitivity", "confidence", "value"],
+        "properties": {
+          "id": {"type": "string"},
+          "source": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "properties": {"kind": {"type": "string"}, "name": {"type": "string"}}
+          },
+          "observed_at": {"type": ["string", "null"]},
+          "freshness": {
+            "type": "object",
+            "required": ["status", "age_seconds", "limit_seconds"],
+            "properties": {
+              "status": {"enum": ["fresh", "stale", "unknown"]},
+              "age_seconds": {"type": ["integer", "null"], "minimum": 0},
+              "limit_seconds": {"type": "integer", "minimum": 1}
+            }
+          },
+          "sensitivity": {"enum": ["public", "internal", "household", "private"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "situations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "state", "confidence", "rule", "evidence", "why"],
+        "properties": {
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "why": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "boundaries": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

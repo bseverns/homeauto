@@ -17,6 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "coordination" / "sources.json"
 DIRECTIVES_DIR = ROOT / "coordination" / "directives"
+WORLD_STATE_PATH = ROOT / "coordination" / "state" / "world-state.json"
 TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
 ACTION_TYPES = (
     "review_candidate",
@@ -277,6 +278,7 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
             "freshness": load_summary("schedule_freshness", summarize_freshness),
         },
         "directives": directives,
+        "world_state": read_json(WORLD_STATE_PATH) if WORLD_STATE_PATH.is_file() else None,
         "warnings": warnings,
         "boundaries": [
             "Analyst candidates are not commitments.",
@@ -413,6 +415,45 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
                 f"{cell(item.get('target'))} | {cell(item.get('action_type'))} | "
                 f"{cell(item.get('instruction'))} |"
             )
+
+    world_state = snapshot.get("world_state") or {}
+    lines.extend(
+        [
+            "",
+            "## World situations",
+            "",
+            "| Situation | State | Confidence |",
+            "| --- | --- | --- |",
+        ]
+    )
+    situations = world_state.get("situations", [])
+    for item in situations:
+        lines.append(
+            f"| {cell(item.get('label'))} | {cell(item.get('state'))} | "
+            f"{float(item.get('confidence', 0)):.2f} |"
+        )
+        lines.extend(
+            [
+                "",
+                f"<details><summary>Why? {cell(item.get('label'))}</summary>",
+                "",
+                f"Rule: {cell(item.get('rule'))}",
+                "",
+            ]
+        )
+        reasons = item.get("why", [])
+        lines.extend(f"- {cell(reason)}" for reason in reasons)
+        if not reasons:
+            lines.append("- No matching observations.")
+        lines.extend(["", "</details>"])
+    if not situations:
+        lines.append("| — | unavailable | 0.00 |")
+
+    lines.extend(["", "### World-state boundaries", ""])
+    world_boundaries = world_state.get("boundaries", [])
+    lines.extend(f"- {cell(boundary)}" for boundary in world_boundaries)
+    if not world_boundaries:
+        lines.append("- World state has not been collected yet; no control is inferred.")
 
     freshness = snapshot.get("schedule", {}).get("freshness") or {}
     all_warnings = list(snapshot.get("warnings", []))

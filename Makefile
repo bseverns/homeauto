@@ -23,6 +23,8 @@ restore-check:
 
 coordination-refresh:
 	python3 scripts/lab-console refresh
+	python3 scripts/world_state.py
+	python3 scripts/lab-console refresh
 
 coordination-status:
 	python3 scripts/lab-console status

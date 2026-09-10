@@ -68,3 +68,25 @@ docker compose --profile assistant run --rm assistant-ingest
 
 Only the distilled console artifacts and directives are added through this path;
 the assistant does not crawl the three neighboring repositories.
+
+## Read-only world state
+
+`make coordination-refresh` now writes two additional ignored artifacts:
+
+- `coordination/state/world-telemetry.json` is the raw collector envelope.
+- `coordination/state/world-state.json` contains normalized observations and the
+  deterministic situations shown in `dashboard.md`.
+
+The contracts are [`raw-telemetry.schema.json`](./raw-telemetry.schema.json) and
+[`world-state.schema.json`](./world-state.schema.json). Each observation records its
+source, observation time, freshness, sensitivity, and confidence. Every situation
+links to observation IDs and displays its fixed rule under **Why?**.
+
+Host and Docker Compose state are collected locally. Set `HA_URL` and `HA_TOKEN` to
+enable the read-only Home Assistant `GET /api/states` collector. Set `MQTT_HOST`
+(and optionally `MQTT_TOPIC`) to sample MQTT with `mosquitto_sub`; it never publishes.
+Collector failures are recorded in raw `errors` and do not trigger control actions.
+
+The structured state may be ingested by the local assistant only downstream. Neither
+the collector nor the rule layer creates, confirms, dispatches, or executes a
+directive; confirmation authority remains human.
