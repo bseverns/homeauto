@@ -3,7 +3,7 @@
   "$id": "world-state.schema.json",
   "title": "Homeauto interpreted world state",
   "type": "object",
-  "required": ["contract", "generated_at", "observations", "situations", "transitions", "boundaries"],
+  "required": ["contract", "generated_at", "observations", "machines", "capabilities", "situations", "transitions", "boundaries"],
   "properties": {
     "contract": {
       "type": "object",
@@ -28,6 +28,7 @@
             "properties": {
               "kind": {"type": "string"},
               "name": {"type": "string"},
+              "key": {"type": "string"},
               "domain": {"type": "string"},
               "semantic": {"type": "string"},
               "state_kind": {"enum": ["state", "retained", "event"]},
@@ -48,6 +49,45 @@
           "sensitivity": {"enum": ["public", "internal", "household", "private"]},
           "confidence": {"type": "number", "minimum": 0, "maximum": 1}
         }
+      }
+    },
+    "machines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "docs_ref", "scope", "dashboard", "lifecycle", "capabilities", "readiness", "runtime", "freshness", "affordances", "affordance_scope", "evidence", "why"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^studio-machine:[a-z0-9-]+$"},
+          "label": {"type": "string"},
+          "docs_ref": {"type": ["string", "null"]},
+          "scope": {"type": "string"},
+          "dashboard": {"type": "boolean"},
+          "lifecycle": {"enum": ["operational", "project", "research", "commissioning", "offline", "retired", "unknown"]},
+          "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "readiness": {"enum": ["ready", "busy", "needs_attention", "project", "research", "unknown", "unavailable"]},
+          "runtime": {"type": "string"},
+          "freshness": {"enum": ["fresh", "stale", "unknown", "unavailable"]},
+          "affordances": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "affordance_scope": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "why": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["capability", "scope", "state", "available_resources", "evidence"],
+        "properties": {
+          "capability": {"type": "string"},
+          "scope": {"type": "string"},
+          "state": {"enum": ["ready", "busy", "needs_attention", "unknown"]},
+          "available_resources": {"type": "integer", "minimum": 0},
+          "evidence": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
       }
     },
     "situations": {

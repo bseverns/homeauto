@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "machines": [
+    {
+      "id": "studio-machine:bambu-p1s",
+      "label": "Bambu Lab P1S",
+      "docs_ref": "../machine-docs/machines/bambu-lab-p1s/machine-card.md",
+      "scope": "studio",
+      "lifecycle": "commissioning",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:lulzbot-mini-2",
+      "label": "LulzBot Mini 2",
+      "docs_ref": "../machine-docs/personal-machines/lulzbot-mini-2/machine-card.md",
+      "scope": "studio",
+      "lifecycle": "project",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:aquila-modified",
+      "label": "Voxelab Aquila X2 / modified Aquila",
+      "docs_ref": "../machine-docs/personal-machines/voxelab-aquila-skrmini-e3v3-sprite-crtouch-proui/firmware.md",
+      "scope": "studio",
+      "lifecycle": "commissioning",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:genmitsu-cubiko",
+      "label": "Genmitsu Cubiko",
+      "docs_ref": "../machine-docs/machines/genmitsu-cubiko/machine-card.md",
+      "scope": "studio",
+      "lifecycle": "commissioning",
+      "capabilities": ["cnc-mill"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:folgertech-i3-rebuild",
+      "label": "FolgerTech i3 rebuild",
+      "docs_ref": "../machine-docs/personal-machines/folgertech-i3-einsyretro-rebuild/README.md",
+      "scope": "studio",
+      "lifecycle": "project",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:stratasys-mojo-retrofit",
+      "label": "Stratasys Mojo retrofit",
+      "docs_ref": "../machine-docs/personal-machines/stratasys-retrofits/mojo-marlin/README.md",
+      "scope": "studio",
+      "lifecycle": "project",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    },
+    {
+      "id": "studio-machine:uprint-open-control",
+      "label": "uPrint open-control research machine",
+      "docs_ref": "../machine-docs/personal-machines/stratasys-retrofits/uprint-open/README.md",
+      "scope": "studio",
+      "lifecycle": "research",
+      "capabilities": ["fdm-print"],
+      "dashboard": true,
+      "contributes_affordances": false
+    }
+  ]
+}

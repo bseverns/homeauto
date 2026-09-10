@@ -83,6 +83,24 @@ The contracts are [`raw-telemetry.schema.json`](./raw-telemetry.schema.json) and
 retained-state versus event semantics, Home Assistant field allowlists, and physical
 world affordances are declared in [`world-sources.json`](./world-sources.json).
 Unlisted Home Assistant entities are discarded before the raw artifact is written.
+
+[`studio-machines.json`](./studio-machines.json) is the deliberately small membership
+list for machines shown in the control deck; its contract is
+[`studio-machines.schema.json`](./studio-machines.schema.json). Entries retain stable
+pointers into the sibling `machine-docs` repository but never parse or copy those
+documents at runtime. `machine-docs` remains authoritative for identity, installed
+configuration, maintenance, safety, and project maturity. `homeauto` owns runtime
+observations, deterministic readiness, scoped affordances, transitions, and display.
+
+Registered machines remain visible without telemetry. Missing telemetry is reported as
+`no telemetry`/`unavailable`, distinct from a fresh explicit `offline` observation.
+Only an `operational` machine with fresh ready-state telemetry and
+`contributes_affordances: true` can expose its declared capabilities as current
+affordances. Project, research, commissioning, stale, and unknown machines cannot
+masquerade as ready production resources. Capability summaries are derived from the
+machine rows and retain machine IDs as evidence. Machine readiness changes share the
+existing 100-entry bounded transition history; raw telemetry changes are not recorded.
+
 Each observation records its source, observation time, freshness, sensitivity, and
 confidence. Every situation links to observation IDs and displays its fixed rule under
 **Why?**. Health is `DEGRADED` from fresh bad evidence, `HEALTHY` from fresh all-good

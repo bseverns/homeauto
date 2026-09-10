@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "studio-machines.schema.json",
+  "title": "Curated studio-machine membership",
+  "type": "object",
+  "required": ["schema_version", "machines"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "machines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "docs_ref", "scope", "lifecycle", "capabilities", "dashboard", "contributes_affordances"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^studio-machine:[a-z0-9-]+$"},
+          "label": {"type": "string", "minLength": 1},
+          "docs_ref": {"type": ["string", "null"]},
+          "scope": {"type": "string", "minLength": 1},
+          "lifecycle": {"enum": ["operational", "project", "research", "commissioning", "offline", "retired", "unknown"]},
+          "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "telemetry": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "match"],
+              "properties": {
+                "kind": {"type": "string"},
+                "match": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          },
+          "dashboard": {"type": "boolean"},
+          "contributes_affordances": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import re
 import sys
@@ -295,7 +296,7 @@ def cell(value: Any) -> str:
         return "—"
     if isinstance(value, list):
         value = ", ".join(str(item) for item in value)
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    return html.escape(str(value)).replace("|", "\\|").replace("\n", " ")
 
 
 def render_dashboard(snapshot: dict[str, Any]) -> str:
@@ -417,6 +418,55 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
             )
 
     world_state = snapshot.get("world_state") or {}
+    lines.extend(
+        [
+            "",
+            "## Studio capabilities",
+            "",
+            "| Capability | Scope | State | Available resources |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    capabilities = world_state.get("capabilities", [])
+    for item in capabilities:
+        lines.append(
+            f"| {cell(item.get('capability'))} | {cell(item.get('scope'))} | {cell(item.get('state')).upper()} | "
+            f"{int(item.get('available_resources', 0))} |"
+        )
+    if not capabilities:
+        lines.append("| — | — | UNKNOWN | 0 |")
+
+    lines.extend(
+        [
+            "",
+            "## Studio Machines",
+            "",
+            "| Machine | Readiness | Runtime | Lifecycle | Freshness |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    transitions = world_state.get("transitions", [])
+    machines = [item for item in world_state.get("machines", []) if item.get("dashboard", True)]
+    for item in machines:
+        lines.append(
+            f"| {cell(item.get('label'))} | {cell(item.get('readiness')).upper()} | "
+            f"{cell(item.get('runtime'))} | {cell(item.get('lifecycle'))} | {cell(item.get('freshness'))} |"
+        )
+        recent = [transition for transition in transitions if transition.get("situation_id") == item.get("id")][-3:]
+        lines.extend(["", f"<details><summary>Why? {cell(item.get('label'))}</summary>", ""])
+        lines.append(f"- Documentation: {cell(item.get('docs_ref') or 'canonical mapping unresolved')}")
+        lines.append(f"- Lifecycle: {cell(item.get('lifecycle'))}")
+        lines.append(f"- Capabilities: {cell(', '.join(item.get('capabilities', [])) or 'none declared')}")
+        lines.append(f"- Current affordances: {cell(', '.join(item.get('affordances', [])) or 'none')}")
+        lines.extend(f"- Evidence: {cell(reason)}" for reason in item.get("why", []))
+        lines.extend(
+            f"- Transition: {cell(transition.get('from'))} → {cell(transition.get('to'))} at {cell(transition.get('changed_at'))}"
+            for transition in recent
+        )
+        lines.extend(["", "</details>"])
+    if not machines:
+        lines.append("| — | UNKNOWN | no registry entries | — | unavailable |")
+
     lines.extend(
         [
             "",

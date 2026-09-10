@@ -16,6 +16,9 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    def test_dashboard_cells_escape_html_and_markdown_tables(self):
+        self.assertEqual(lab_console.cell("<script>|private</script>"), "&lt;script&gt;\\|private&lt;/script&gt;")
+
     def test_analyst_summary_omits_private_source_material(self):
         payload = {
             "contract_version": 2,
@@ -76,6 +79,33 @@ class LabConsoleTests(unittest.TestCase):
                 "directives": [],
                 "warnings": [],
                 "world_state": {
+                    "machines": [{
+                        "id": "studio-machine:test-printer",
+                        "label": "Test Printer",
+                        "docs_ref": "../machine-docs/personal-machines/test-printer/",
+                        "scope": "personal-studio",
+                        "lifecycle": "operational",
+                        "capabilities": ["fdm-print"],
+                        "readiness": "ready",
+                        "runtime": "idle",
+                        "freshness": "fresh",
+                        "affordances": ["fdm-print"],
+                        "affordance_scope": "personal-studio",
+                        "evidence": ["mqtt:octoprint:octoprint/test-printer/state"],
+                        "why": ["fresh idle telemetry supports ready"],
+                    }],
+                    "capabilities": [{
+                        "capability": "fdm-print",
+                        "state": "ready",
+                        "available_resources": 1,
+                        "evidence": ["studio-machine:test-printer"],
+                    }],
+                    "transitions": [{
+                        "situation_id": "studio-machine:test-printer",
+                        "from": "unknown",
+                        "to": "ready",
+                        "changed_at": "2026-09-10T00:00:00+00:00",
+                    }],
                     "situations": [
                         {
                             "id": "system-health",
@@ -100,6 +130,11 @@ class LabConsoleTests(unittest.TestCase):
         self.assertIn("Analyst candidates are not commitments", dashboard)
         self.assertIn("Capacity fit is not a scheduled calendar event", dashboard)
         self.assertIn("## World situations", dashboard)
+        self.assertIn("## Studio capabilities", dashboard)
+        self.assertIn("## Studio Machines", dashboard)
+        self.assertIn("Test Printer", dashboard)
+        self.assertIn("../machine-docs/personal-machines/test-printer/", dashboard)
+        self.assertIn("unknown → ready", dashboard)
         self.assertIn("Why?", dashboard)
 
 

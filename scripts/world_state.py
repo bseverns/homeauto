@@ -22,6 +22,7 @@ DEFAULT_RAW = STATE_DIR / "world-telemetry.json"
 DEFAULT_STATE = STATE_DIR / "world-state.json"
 DEFAULT_COORDINATION = STATE_DIR / "snapshot.json"
 DEFAULT_REGISTRY = ROOT / "coordination" / "world-sources.json"
+DEFAULT_STUDIO_REGISTRY = ROOT / "coordination" / "studio-machines.json"
 BOUNDARY = "World state is read-only and does not create, approve, or dispatch directives."
 ACTIVE = {"active", "detected", "home", "occupied", "on", "open", "printing", "paused"}
 RUNNING = {"healthy", "running", "up"}
@@ -42,7 +43,9 @@ def freshness(observed_at: str | None, collected_at: str, limit: int) -> dict[st
     collected = parse_time(collected_at)
     if not observed or not collected:
         return {"status": "unknown", "age_seconds": None, "limit_seconds": limit}
-    age = max(0, int((collected - observed).total_seconds()))
+    age = int((collected - observed).total_seconds())
+    if age < 0:
+        return {"status": "unknown", "age_seconds": None, "limit_seconds": limit}
     return {"status": "fresh" if age <= limit else "stale", "age_seconds": age, "limit_seconds": limit}
 
 
@@ -69,6 +72,17 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
 def load_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_studio_registry(path: Path = DEFAULT_STUDIO_REGISTRY) -> dict[str, Any]:
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    machines = registry.get("machines")
+    if registry.get("schema_version") != "1.0.0" or not isinstance(machines, list):
+        raise ValueError("invalid studio-machine registry")
+    identifiers = [item.get("id") for item in machines if isinstance(item, dict)]
+    if len(identifiers) != len(machines) or len(set(identifiers)) != len(identifiers) or None in identifiers:
+        raise ValueError("studio-machine IDs must be present and unique")
+    return registry
 
 
 def _matches(kind: str, pattern: str, key: str) -> bool:
@@ -111,7 +125,7 @@ def _observation(source: dict[str, str], item: Any, index: int, meta: dict[str, 
         "semantic": "collector_status" if kind == "collector" else "unknown",
         "state_kind": "state",
     }
-    declared_source = {**source, **{key: definition[key] for key in ("domain", "semantic", "state_kind", "affordances", "affordance_scope") if key in definition}}
+    declared_source = {**source, "key": key, **{key: definition[key] for key in ("domain", "semantic", "state_kind", "affordances", "affordance_scope") if key in definition}}
     return {
         "id": f"{kind}:{name}:{key}",
         "source": declared_source,
@@ -171,7 +185,7 @@ def _situation(identifier: str, label: str, state: str, rule: str, evidence: lis
     }
 
 
-def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def derive(observations: list[dict[str, Any]], machines: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     services = [item for item in observations if item["source"].get("semantic") == "service_health"]
     systems = [item for item in observations if item["source"].get("semantic") == "host_health"]
     health_observations = services + systems
@@ -206,7 +220,17 @@ def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     coordination = next((item for item in observations if item["source"].get("semantic") == "benlab_context"), None)
     context = coordination.get("value", {}) if coordination and coordination["freshness"]["status"] == "fresh" else {}
     capacity = set(context.get("capacity_projects", []))
-    affordances = [item for item in observations if item["freshness"]["status"] == "fresh" and item["source"].get("affordances") and item["source"].get("affordance_scope")]
+    machine_resources = [
+        {
+            "id": item["id"],
+            "source": {"affordances": item["affordances"], "affordance_scope": item["affordance_scope"]},
+            "freshness": {"status": "fresh"},
+            "confidence": 1.0,
+            "value": {"state": item["readiness"]},
+        }
+        for item in (machines or []) if item.get("affordances") and item.get("affordance_scope")
+    ]
+    affordances = [item for item in [*observations, *machine_resources] if item["freshness"]["status"] == "fresh" and item["source"].get("affordances") and item["source"].get("affordance_scope")]
     scopes = {}
     for item in affordances:
         scopes.setdefault(item["source"]["affordance_scope"], []).append(item)
@@ -241,13 +265,102 @@ def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result + action_opportunities + evidence_opportunities
 
 
-def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None, previous_state: dict[str, Any] | None = None) -> dict[str, Any]:
+def derive_machines(observations: list[dict[str, Any]], registry: dict[str, Any]) -> list[dict[str, Any]]:
+    runtime_states = {"idle", "ready", "available", "operational", "printing", "active", "paused", "fault", "error", "failed", "offline", "unavailable", "disconnected"}
+    machines = []
+    for declared in registry.get("machines", []):
+        matches = [
+            observation for observation in observations
+            if any(
+                observation["source"]["kind"] == binding["kind"]
+                and _matches(binding["kind"], binding["match"], observation["source"].get("key", ""))
+                for binding in declared.get("telemetry", [])
+            )
+        ]
+        current = max(matches, key=lambda item: (item["freshness"]["status"] == "fresh", item.get("observed_at") or ""), default=None)
+        lifecycle = declared["lifecycle"]
+        runtime = _state(current) if current else "no telemetry"
+        if current and runtime not in runtime_states:
+            runtime = "unknown"
+        current_freshness = current["freshness"]["status"] if current else "unavailable"
+        if lifecycle == "project":
+            readiness = "project"
+        elif lifecycle == "research":
+            readiness = "research"
+        elif lifecycle in {"offline", "retired"}:
+            readiness = "unavailable"
+        elif lifecycle != "operational" or not current or current_freshness != "fresh":
+            readiness = "unknown"
+        elif runtime in {"idle", "ready", "available", "operational"}:
+            readiness = "ready"
+        elif runtime in {"printing", "active", "paused"}:
+            readiness = "busy"
+        elif runtime in {"fault", "error", "failed"}:
+            readiness = "needs_attention"
+        elif runtime in {"offline", "unavailable", "disconnected"}:
+            readiness = "unavailable"
+        else:
+            readiness = "unknown"
+        capabilities = list(declared.get("capabilities", []))
+        affordances = capabilities if readiness == "ready" and declared.get("contributes_affordances") else []
+        why = [f"documentation: {declared.get('docs_ref') or 'canonical mapping unresolved'}", f"declared lifecycle: {lifecycle}"]
+        if current:
+            why.append(f"{current['id']} = {runtime} ({current_freshness})")
+        else:
+            why.append("no declared live telemetry observation")
+        machines.append({
+            "id": declared["id"],
+            "label": declared["label"],
+            "docs_ref": declared.get("docs_ref"),
+            "scope": declared["scope"],
+            "dashboard": declared["dashboard"],
+            "lifecycle": lifecycle,
+            "capabilities": capabilities,
+            "readiness": readiness,
+            "runtime": runtime,
+            "freshness": current_freshness,
+            "affordances": affordances,
+            "affordance_scope": declared["scope"],
+            "evidence": [item["id"] for item in matches],
+            "why": why,
+        })
+    return machines
+
+
+def derive_capabilities(machines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    capabilities = sorted({(machine["scope"], capability) for machine in machines for capability in machine["capabilities"]})
+    result = []
+    for scope, capability in capabilities:
+        evidence = [machine for machine in machines if machine["scope"] == scope and capability in machine["capabilities"]]
+        ready = [machine for machine in evidence if capability in machine["affordances"]]
+        states = {machine["readiness"] for machine in evidence}
+        state = "ready" if ready else "needs_attention" if "needs_attention" in states else "busy" if "busy" in states else "unknown"
+        result.append({
+            "capability": capability,
+            "scope": scope,
+            "state": state,
+            "available_resources": len(ready),
+            "evidence": [machine["id"] for machine in evidence],
+        })
+    return result
+
+
+def interpret(
+    raw: dict[str, Any],
+    registry: dict[str, Any] | None = None,
+    previous_state: dict[str, Any] | None = None,
+    studio_registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     observations = normalize(raw, registry)
-    situations = derive(observations)
+    machines = derive_machines(observations, studio_registry or load_studio_registry())
+    capabilities = derive_capabilities(machines)
+    situations = derive(observations, machines)
     transitions = list((previous_state or {}).get("transitions", []))
     if previous_state:
         before = {item["id"]: item["state"] for item in previous_state.get("situations", [])}
+        before.update({item["id"]: item["readiness"] for item in previous_state.get("machines", [])})
         after = {item["id"]: item["state"] for item in situations}
+        after.update({item["id"]: item["readiness"] for item in machines})
         transitions.extend(
             {"situation_id": identifier, "from": before.get(identifier), "to": after.get(identifier), "changed_at": raw["collected_at"]}
             for identifier in sorted(before.keys() | after.keys())
@@ -261,6 +374,8 @@ def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None, previ
         },
         "generated_at": raw["collected_at"],
         "observations": observations,
+        "machines": machines,
+        "capabilities": capabilities,
         "situations": situations,
         "transitions": transitions[-100:],
         "boundaries": [BOUNDARY, "The local LLM consumes structured state downstream and is not a state source."],
@@ -377,11 +492,12 @@ def main() -> int:
     parser.add_argument("--raw", type=Path, default=DEFAULT_RAW)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--coordination", type=Path, default=DEFAULT_COORDINATION)
+    parser.add_argument("--studio-machines", type=Path, default=DEFAULT_STUDIO_REGISTRY)
     parser.add_argument("--fixture", type=Path)
     args = parser.parse_args()
     raw = json.loads(args.fixture.read_text()) if args.fixture else collect_raw(args.coordination)
     previous_state = json.loads(args.state.read_text(encoding="utf-8")) if args.state.is_file() else None
-    state = interpret(raw, previous_state=previous_state)
+    state = interpret(raw, previous_state=previous_state, studio_registry=load_studio_registry(args.studio_machines))
     args.raw.parent.mkdir(parents=True, exist_ok=True)
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.raw.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
