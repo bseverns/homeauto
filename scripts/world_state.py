@@ -59,8 +59,8 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "warning_count": len(payload.get("warnings", [])),
         "directive_count": len(payload.get("directives", [])),
-        "evidence_needs": [
-            {key: item.get(key) for key in ("project", "next_action", "effort", "stack", "route", "attention")}
+        "active_needs": [
+            {key: item.get(key) for key in ("project", "next_action", "effort", "stack", "route", "attention", "need_type", "evidence_blocker", "proof_route") if key in item}
             for item in needs if isinstance(item, dict)
         ],
         "capacity_projects": [item.get("project") for item in fits if item.get("temporal_status") == "today"],
@@ -106,12 +106,12 @@ def _observation(source: dict[str, str], item: Any, index: int, meta: dict[str, 
             value = {"state": item.get("state")}
         elif kind == "coordination":
             value = _coordination_summary(item)
-    definition = _source_definition(registry, kind, key) or {
+    definition = _source_definition(registry, kind, key) or _source_definition(registry, kind, name) or {
         "domain": "system" if kind == "collector" else "unknown",
         "semantic": "collector_status" if kind == "collector" else "unknown",
         "state_kind": "state",
     }
-    declared_source = {**source, **{key: definition[key] for key in ("domain", "semantic", "state_kind", "affordances") if key in definition}}
+    declared_source = {**source, **{key: definition[key] for key in ("domain", "semantic", "state_kind", "affordances", "affordance_scope") if key in definition}}
     return {
         "id": f"{kind}:{name}:{key}",
         "source": declared_source,
@@ -174,13 +174,17 @@ def _situation(identifier: str, label: str, state: str, rule: str, evidence: lis
 def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     services = [item for item in observations if item["source"].get("semantic") == "service_health"]
     systems = [item for item in observations if item["source"].get("semantic") == "host_health"]
-    bad_services = [item for item in services if _state(item) not in RUNNING]
+    health_observations = services + systems
+    fresh_health = [item for item in health_observations if item["freshness"]["status"] == "fresh"]
+    uncertain_health = [item for item in health_observations if item["freshness"]["status"] != "fresh"]
+    bad_services = [item for item in fresh_health if item["source"].get("semantic") == "service_health" and _state(item) not in RUNNING]
     bad_systems = [
-        item for item in systems
+        item for item in fresh_health
+        if item["source"].get("semantic") == "host_health"
         if isinstance(item.get("value"), dict) and float(item["value"].get("disk_used_percent", 0)) >= 90
     ]
-    health_evidence = bad_services + bad_systems or services + systems
-    health = "degraded" if bad_services or bad_systems else "healthy" if health_evidence else "unknown"
+    health_evidence = bad_services + bad_systems or uncertain_health or fresh_health
+    health = "degraded" if bad_services or bad_systems else "uncertain" if uncertain_health else "healthy" if fresh_health else "unknown"
 
     studio = [item for item in observations if item["source"].get("domain") == "studio" and item["source"].get("state_kind") in {"state", "retained"}]
     active_studio = [item for item in studio if _state(item) in ACTIVE]
@@ -202,29 +206,53 @@ def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     coordination = next((item for item in observations if item["source"].get("semantic") == "benlab_context"), None)
     context = coordination.get("value", {}) if coordination and coordination["freshness"]["status"] == "fresh" else {}
     capacity = set(context.get("capacity_projects", []))
-    affordances = [item for item in observations if item["freshness"]["status"] == "fresh" and item["source"].get("affordances")]
-    opportunities = []
-    for need in context.get("evidence_needs", []):
+    affordances = [item for item in observations if item["freshness"]["status"] == "fresh" and item["source"].get("affordances") and item["source"].get("affordance_scope")]
+    scopes = {}
+    for item in affordances:
+        scopes.setdefault(item["source"]["affordance_scope"], []).append(item)
+    action_opportunities = []
+    evidence_opportunities = []
+    for need in context.get("active_needs", []):
         required = set(need.get("stack") or [])
-        world = next((item for item in affordances if required.issubset(set(item["source"]["affordances"]))), None)
-        if need.get("project") in capacity and world:
-            opportunities.append(_situation(
+        resources = next((items for items in scopes.values() if required and required.issubset(set().union(*(set(item["source"]["affordances"]) for item in items)))), None)
+        if need.get("project") not in capacity or not resources:
+            continue
+        contributors = [item for item in resources if required.intersection(item["source"]["affordances"])]
+        evidence = [coordination, *contributors]
+        action_opportunities.append(_situation(
+            f"action-opportunity:{need['project']}", f"Action opportunity: {need['project']}", "available",
+            "available when scoped world affordances satisfy a BenLab-authored active need with current schedule capacity",
+            evidence,
+        ))
+        if need.get("need_type") == "evidence" or need.get("evidence_blocker") or need.get("proof_route"):
+            evidence_opportunities.append(_situation(
                 f"evidence-opportunity:{need['project']}", f"Evidence opportunity: {need['project']}", "available",
-                "available when a world affordance satisfies a BenLab-authored evidence need with current schedule capacity",
-                [item for item in (coordination, world) if item],
+                "available only when BenLab explicitly types an evidence need and scoped world affordances and current capacity satisfy it",
+                evidence,
             ))
     result = [
-        _situation("system-health", "System health", health, "degraded when a service is not running or disk use is at least 90%", health_evidence),
+        _situation("system-health", "System health", health, "fresh bad evidence is degraded; stale evidence is uncertain; absent evidence is unknown", health_evidence),
         _situation("studio-activity", "Studio activity", studio_state, "fresh declared studio state may assert activity; stale active state is uncertain", fresh_active_studio or stale_active_studio or studio),
         _situation("fabrication-activity", "Fabrication activity", fabrication_state, "fresh declared fabrication state may assert activity; events do not assert persistent state", fresh_active_fabrication or stale_active_fabrication or fabrication),
         _situation("source-staleness", "Source staleness", stale_state, "unavailable when collection fails; stale when any observation exceeds its source freshness limit", unavailable or stale or unknown_freshness or observations),
-        _situation("evidence-opportunities", "Evidence opportunities", "available" if opportunities else "unknown" if not coordination else "none", "summarizes deterministic joins of world affordances, BenLab evidence needs, and current capacity", [coordination] if coordination else []),
+        _situation("action-opportunities", "Action opportunities", "available" if action_opportunities else "unknown" if not coordination else "none", "summarizes scoped joins of world affordances, BenLab active needs, and current capacity", [coordination] if coordination else []),
+        _situation("evidence-opportunities", "Evidence opportunities", "available" if evidence_opportunities else "unknown" if not coordination else "none", "summarizes scoped joins explicitly typed as evidence needs by BenLab", [coordination] if coordination else []),
     ]
-    return result + opportunities
+    return result + action_opportunities + evidence_opportunities
 
 
-def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None) -> dict[str, Any]:
+def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None, previous_state: dict[str, Any] | None = None) -> dict[str, Any]:
     observations = normalize(raw, registry)
+    situations = derive(observations)
+    transitions = list((previous_state or {}).get("transitions", []))
+    if previous_state:
+        before = {item["id"]: item["state"] for item in previous_state.get("situations", [])}
+        after = {item["id"]: item["state"] for item in situations}
+        transitions.extend(
+            {"situation_id": identifier, "from": before.get(identifier), "to": after.get(identifier), "changed_at": raw["collected_at"]}
+            for identifier in sorted(before.keys() | after.keys())
+            if before.get(identifier) != after.get(identifier)
+        )
     return {
         "contract": {
             "name": "homeauto-world-state",
@@ -233,7 +261,8 @@ def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None) -> di
         },
         "generated_at": raw["collected_at"],
         "observations": observations,
-        "situations": derive(observations),
+        "situations": situations,
+        "transitions": transitions[-100:],
         "boundaries": [BOUNDARY, "The local LLM consumes structured state downstream and is not a state source."],
     }
 
@@ -351,7 +380,8 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path)
     args = parser.parse_args()
     raw = json.loads(args.fixture.read_text()) if args.fixture else collect_raw(args.coordination)
-    state = interpret(raw)
+    previous_state = json.loads(args.state.read_text(encoding="utf-8")) if args.state.is_file() else None
+    state = interpret(raw, previous_state=previous_state)
     args.raw.parent.mkdir(parents=True, exist_ok=True)
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.raw.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")

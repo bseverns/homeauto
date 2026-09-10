@@ -3,7 +3,7 @@
   "$id": "world-state.schema.json",
   "title": "Homeauto interpreted world state",
   "type": "object",
-  "required": ["contract", "generated_at", "observations", "situations", "boundaries"],
+  "required": ["contract", "generated_at", "observations", "situations", "transitions", "boundaries"],
   "properties": {
     "contract": {
       "type": "object",
@@ -31,7 +31,8 @@
               "domain": {"type": "string"},
               "semantic": {"type": "string"},
               "state_kind": {"enum": ["state", "retained", "event"]},
-              "affordances": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+              "affordances": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+              "affordance_scope": {"type": "string"}
             }
           },
           "observed_at": {"type": ["string", "null"]},
@@ -58,6 +59,21 @@
           "evidence": {"type": "array", "items": {"type": "string"}},
           "why": {"type": "array", "items": {"type": "string"}}
         }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["situation_id", "from", "to", "changed_at"],
+        "properties": {
+          "situation_id": {"type": "string"},
+          "from": {"type": ["string", "null"]},
+          "to": {"type": ["string", "null"]},
+          "changed_at": {"type": "string"}
+        },
+        "additionalProperties": false
       }
     },
     "boundaries": {"type": "array", "items": {"type": "string"}}

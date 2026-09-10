@@ -37,7 +37,8 @@
       "state_kind": "state",
       "freshness_seconds": 120,
       "sensitivity": "internal",
-      "affordances": ["terminal", "repo"]
+      "affordances": ["terminal", "repo"],
+      "affordance_scope": "local-operator"
     },
     {
       "kind": "coordination",

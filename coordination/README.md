@@ -85,9 +85,13 @@ world affordances are declared in [`world-sources.json`](./world-sources.json).
 Unlisted Home Assistant entities are discarded before the raw artifact is written.
 Each observation records its source, observation time, freshness, sensitivity, and
 confidence. Every situation links to observation IDs and displays its fixed rule under
-**Why?**. Stale activity is `UNCERTAIN`, absent evidence is `UNKNOWN`, and evidence
-opportunities require a declared world affordance, a BenLab-owned evidence need, and
-current schedule capacity.
+**Why?**. Health is `DEGRADED` from fresh bad evidence, `HEALTHY` from fresh all-good
+evidence, `UNCERTAIN` from stale evidence, and `UNKNOWN` without evidence. BenLab
+`now` items remain neutral `active_needs`; only explicitly typed evidence needs create
+an evidence opportunity. Required affordances may compose across resources only when
+all resources declare the same `affordance_scope`, and every contributor remains in the
+evidence trail. The state carries at most 100 situation transitions for compact change
+history.
 
 Host and Docker Compose state are collected locally. Set `HA_URL` and `HA_TOKEN` to
 enable the read-only Home Assistant `GET /api/states` collector. Set `MQTT_HOST`

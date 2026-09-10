@@ -52,6 +52,18 @@ class WorldStateTests(unittest.TestCase):
         self.assertEqual(situation["state"], "uncertain")
         self.assertLess(situation["confidence"], 1.0)
 
+    def test_system_health_is_three_valued_by_freshness(self):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"][2]["observed_at"] = "2026-09-10T14:00:00+00:00"
+        raw["sources"][3]["observed_at"] = "2026-09-10T14:00:00+00:00"
+        health = {item["id"]: item for item in world_state.interpret(raw)["situations"]}["system-health"]
+        self.assertEqual(health["state"], "uncertain")
+        self.assertLess(health["confidence"], 1.0)
+
+        raw["sources"] = [item for item in raw["sources"] if item["source"]["kind"] not in {"service", "system"}]
+        health = {item["id"]: item for item in world_state.interpret(raw)["situations"]}["system-health"]
+        self.assertEqual(health["state"], "unknown")
+
     def test_registry_declares_source_meaning_and_events_do_not_assert_state(self):
         registry = {
             "sources": [{
@@ -89,6 +101,7 @@ class WorldStateTests(unittest.TestCase):
             "benlab": {"now": [{
                 "project": "homeauto", "next_action": "Save an ingest receipt", "effort": "30m",
                 "stack": ["terminal", "repo"], "route": "repo_issue", "attention": "now",
+                "need_type": "evidence",
             }]},
             "schedule": {"capacity": {"fits": [{"project": "homeauto", "temporal_status": "today"}]}},
         })
@@ -96,7 +109,7 @@ class WorldStateTests(unittest.TestCase):
             {
                 "kind": "system", "match": "*", "domain": "system", "semantic": "host_health",
                 "state_kind": "state", "freshness_seconds": 120, "sensitivity": "internal",
-                "affordances": ["terminal", "repo"],
+                "affordances": ["terminal", "repo"], "affordance_scope": "local-operator",
             },
             {
                 "kind": "coordination", "match": "*", "domain": "coordination",
@@ -113,6 +126,64 @@ class WorldStateTests(unittest.TestCase):
         raw["sources"][4]["observed_at"] = "2026-09-10T14:00:00+00:00"
         stale_situations = {item["id"]: item for item in world_state.interpret(raw, registry)["situations"]}
         self.assertNotIn("evidence-opportunity:homeauto", stale_situations)
+
+    def test_active_needs_are_neutral_and_only_explicit_evidence_needs_get_evidence_opportunities(self):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"][4]["observed_at"] = raw["collected_at"]
+        raw["sources"][4]["payload"].update({
+            "benlab": {"now": [{
+                "project": "homeauto", "next_action": "Make a decision", "stack": ["terminal"],
+                "route": "decision", "attention": "now",
+            }]},
+            "schedule": {"capacity": {"fits": [{"project": "homeauto", "temporal_status": "today"}]}},
+        })
+        state = world_state.interpret(raw)
+        coordination = next(item for item in state["observations"] if item["source"]["kind"] == "coordination")
+        situations = {item["id"]: item for item in state["situations"]}
+        self.assertIn("active_needs", coordination["value"])
+        self.assertNotIn("evidence_needs", coordination["value"])
+        self.assertIn("action-opportunity:homeauto", situations)
+        self.assertNotIn("evidence-opportunity:homeauto", situations)
+
+    def test_affordances_compose_only_within_one_scope(self):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"][4]["observed_at"] = raw["collected_at"]
+        raw["sources"][4]["payload"].update({
+            "benlab": {"now": [{
+                "project": "live-rig", "next_action": "Capture evidence",
+                "stack": ["camera", "hardware", "obsidian"], "attention": "now", "need_type": "evidence",
+            }]},
+            "schedule": {"capacity": {"fits": [{"project": "live-rig", "temporal_status": "today"}]}},
+        })
+        raw["sources"].extend([
+            {"source": {"kind": "system", "name": "bench"}, "observed_at": raw["collected_at"], "freshness_seconds": 120, "sensitivity": "internal", "confidence": 1.0, "payload": {}},
+            {"source": {"kind": "system", "name": "laptop"}, "observed_at": raw["collected_at"], "freshness_seconds": 120, "sensitivity": "internal", "confidence": 1.0, "payload": {}},
+        ])
+        registry = {"sources": [
+            {"kind": "system", "match": "bench", "domain": "system", "semantic": "resource", "state_kind": "state", "freshness_seconds": 120, "sensitivity": "internal", "affordances": ["camera", "hardware"], "affordance_scope": "studio"},
+            {"kind": "system", "match": "laptop", "domain": "system", "semantic": "resource", "state_kind": "state", "freshness_seconds": 120, "sensitivity": "internal", "affordances": ["obsidian"], "affordance_scope": "studio"},
+            {"kind": "coordination", "match": "*", "domain": "coordination", "semantic": "benlab_context", "state_kind": "state", "freshness_seconds": 900, "sensitivity": "private"},
+        ]}
+        opportunity = {item["id"]: item for item in world_state.interpret(raw, registry)["situations"]}["evidence-opportunity:live-rig"]
+        self.assertEqual(set(opportunity["evidence"]), {"coordination:operator-snapshot:0", "system:bench:0", "system:laptop:0"})
+
+        registry["sources"][1]["affordance_scope"] = "home"
+        situations = {item["id"] for item in world_state.interpret(raw, registry)["situations"]}
+        self.assertNotIn("evidence-opportunity:live-rig", situations)
+
+    def test_interpret_records_bounded_state_transitions(self):
+        previous = self.state
+        raw = json.loads(json.dumps(self.raw))
+        raw["collected_at"] = "2026-09-10T15:01:00+00:00"
+        raw["sources"][0]["payload"][0]["state"] = "off"
+        raw["sources"][0]["payload"][0]["last_updated"] = raw["collected_at"]
+        state = world_state.interpret(raw, previous_state=previous)
+        transition = next(item for item in state["transitions"] if item["situation_id"] == "studio-activity")
+        self.assertEqual((transition["from"], transition["to"]), ("active", "inactive"))
+        self.assertEqual(transition["changed_at"], raw["collected_at"])
+
+        previous["transitions"] = [{"situation_id": "old", "from": "a", "to": "b", "changed_at": str(index)} for index in range(100)]
+        self.assertEqual(len(world_state.interpret(raw, previous_state=previous)["transitions"]), 100)
 
     def test_rules_derive_health_activity_fabrication_staleness_and_opportunities(self):
         situations = {item["id"]: item for item in self.state["situations"]}
@@ -133,7 +204,7 @@ class WorldStateTests(unittest.TestCase):
         )
         self.assertEqual(
             set(coordination["value"]),
-            {"generated_at", "source_availability", "warning_count", "directive_count", "evidence_needs", "capacity_projects"},
+            {"generated_at", "source_availability", "warning_count", "directive_count", "active_needs", "capacity_projects"},
         )
         evidence_ids = {item["id"] for item in self.state["observations"]}
         self.assertEqual(self.state["contract"]["authority"], "read-only; no control actions")
