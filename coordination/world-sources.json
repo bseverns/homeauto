@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "sources": [
+    {
+      "kind": "home_assistant",
+      "match": "binary_sensor.studio_motion",
+      "domain": "studio",
+      "semantic": "activity",
+      "state_kind": "state",
+      "freshness_seconds": 300,
+      "sensitivity": "household",
+      "retain": ["state", "last_updated"]
+    },
+    {
+      "kind": "mqtt",
+      "match": "octoprint/+/state",
+      "domain": "fabrication",
+      "semantic": "machine_activity",
+      "state_kind": "retained",
+      "freshness_seconds": 300,
+      "sensitivity": "internal"
+    },
+    {
+      "kind": "service",
+      "match": "*",
+      "domain": "system",
+      "semantic": "service_health",
+      "state_kind": "state",
+      "freshness_seconds": 120,
+      "sensitivity": "internal"
+    },
+    {
+      "kind": "system",
+      "match": "*",
+      "domain": "system",
+      "semantic": "host_health",
+      "state_kind": "state",
+      "freshness_seconds": 120,
+      "sensitivity": "internal",
+      "affordances": ["terminal", "repo"]
+    },
+    {
+      "kind": "coordination",
+      "match": "*",
+      "domain": "coordination",
+      "semantic": "benlab_context",
+      "state_kind": "state",
+      "freshness_seconds": 900,
+      "sensitivity": "private"
+    }
+  ]
+}

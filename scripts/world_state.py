@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ STATE_DIR = ROOT / "coordination" / "state"
 DEFAULT_RAW = STATE_DIR / "world-telemetry.json"
 DEFAULT_STATE = STATE_DIR / "world-state.json"
 DEFAULT_COORDINATION = STATE_DIR / "snapshot.json"
+DEFAULT_REGISTRY = ROOT / "coordination" / "world-sources.json"
 BOUNDARY = "World state is read-only and does not create, approve, or dispatch directives."
 ACTIVE = {"active", "detected", "home", "occupied", "on", "open", "printing", "paused"}
 RUNNING = {"healthy", "running", "up"}
@@ -46,6 +48,8 @@ def freshness(observed_at: str | None, collected_at: str, limit: int) -> dict[st
 
 def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
     sources = payload.get("sources", {})
+    needs = payload.get("benlab", {}).get("now", [])
+    fits = payload.get("schedule", {}).get("capacity", {}).get("fits", [])
     return {
         "generated_at": payload.get("generated_at"),
         "source_availability": {
@@ -55,10 +59,36 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "warning_count": len(payload.get("warnings", [])),
         "directive_count": len(payload.get("directives", [])),
+        "evidence_needs": [
+            {key: item.get(key) for key in ("project", "next_action", "effort", "stack", "route", "attention")}
+            for item in needs if isinstance(item, dict)
+        ],
+        "capacity_projects": [item.get("project") for item in fits if item.get("temporal_status") == "today"],
     }
 
 
-def _observation(source: dict[str, str], item: Any, index: int, meta: dict[str, Any], collected_at: str) -> dict[str, Any]:
+def load_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _matches(kind: str, pattern: str, key: str) -> bool:
+    if kind != "mqtt":
+        return fnmatch.fnmatchcase(key, pattern)
+    values = key.split("/")
+    tokens = pattern.split("/")
+    for index, token in enumerate(tokens):
+        if token == "#":
+            return index == len(tokens) - 1
+        if index >= len(values) or (token != "+" and token != values[index]):
+            return False
+    return len(tokens) == len(values)
+
+
+def _source_definition(registry: dict[str, Any], kind: str, key: str) -> dict[str, Any]:
+    return next((item for item in registry.get("sources", []) if item.get("kind") == kind and _matches(kind, item.get("match", ""), key)), {})
+
+
+def _observation(source: dict[str, str], item: Any, index: int, meta: dict[str, Any], collected_at: str, registry: dict[str, Any]) -> dict[str, Any]:
     kind = source["kind"]
     name = source["name"]
     observed_at = meta.get("observed_at")
@@ -76,25 +106,32 @@ def _observation(source: dict[str, str], item: Any, index: int, meta: dict[str, 
             value = {"state": item.get("state")}
         elif kind == "coordination":
             value = _coordination_summary(item)
+    definition = _source_definition(registry, kind, key) or {
+        "domain": "system" if kind == "collector" else "unknown",
+        "semantic": "collector_status" if kind == "collector" else "unknown",
+        "state_kind": "state",
+    }
+    declared_source = {**source, **{key: definition[key] for key in ("domain", "semantic", "state_kind", "affordances") if key in definition}}
     return {
         "id": f"{kind}:{name}:{key}",
-        "source": source,
+        "source": declared_source,
         "observed_at": observed_at,
-        "freshness": freshness(observed_at, collected_at, int(meta.get("freshness_seconds", 300))),
-        "sensitivity": meta.get("sensitivity", "internal"),
+        "freshness": freshness(observed_at, collected_at, int(definition.get("freshness_seconds", meta.get("freshness_seconds", 300)))),
+        "sensitivity": definition.get("sensitivity", meta.get("sensitivity", "internal")),
         "confidence": max(0.0, min(1.0, float(meta.get("confidence", 1.0)))),
         "value": value,
     }
 
 
-def normalize(raw: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize(raw: dict[str, Any], registry: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    registry = registry or load_registry()
     collected_at = raw["collected_at"]
     observations = []
     for record in raw.get("sources", []):
         payload = record.get("payload")
         items = payload if isinstance(payload, list) else [payload]
         observations.extend(
-            _observation(record["source"], item, index, record, collected_at)
+            _observation(record["source"], item, index, record, collected_at, registry)
             for index, item in enumerate(items)
             if item is not None
         )
@@ -105,8 +142,9 @@ def normalize(raw: dict[str, Any]) -> list[dict[str, Any]]:
                 {"kind": "collector", "name": source_name or "unknown"},
                 {"state": "unavailable", "detail": detail.strip()},
                 index,
-                {"observed_at": collected_at, "freshness_seconds": 0, "sensitivity": "internal", "confidence": 1.0},
+                {"observed_at": collected_at, "freshness_seconds": 1, "sensitivity": "internal", "confidence": 1.0},
                 collected_at,
+                registry,
             )
         )
     return observations
@@ -120,7 +158,8 @@ def _state(observation: dict[str, Any]) -> str:
 
 
 def _situation(identifier: str, label: str, state: str, rule: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    confidence = min((item["confidence"] for item in evidence), default=0.0)
+    freshness_weight = {"fresh": 1.0, "stale": 0.5, "unknown": 0.0}
+    confidence = min((item["confidence"] * freshness_weight[item["freshness"]["status"]] for item in evidence), default=0.0)
     return {
         "id": identifier,
         "label": label,
@@ -133,8 +172,8 @@ def _situation(identifier: str, label: str, state: str, rule: str, evidence: lis
 
 
 def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    services = [item for item in observations if item["source"]["kind"] == "service"]
-    systems = [item for item in observations if item["source"]["kind"] == "system"]
+    services = [item for item in observations if item["source"].get("semantic") == "service_health"]
+    systems = [item for item in observations if item["source"].get("semantic") == "host_health"]
     bad_services = [item for item in services if _state(item) not in RUNNING]
     bad_systems = [
         item for item in systems
@@ -143,37 +182,49 @@ def derive(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     health_evidence = bad_services + bad_systems or services + systems
     health = "degraded" if bad_services or bad_systems else "healthy" if health_evidence else "unknown"
 
-    studio = [
-        item for item in observations
-        if "studio" in item["id"].lower()
-    ]
+    studio = [item for item in observations if item["source"].get("domain") == "studio" and item["source"].get("state_kind") in {"state", "retained"}]
     active_studio = [item for item in studio if _state(item) in ACTIVE]
-    studio_state = "active" if active_studio else "inactive" if studio else "unknown"
+    fresh_active_studio = [item for item in active_studio if item["freshness"]["status"] == "fresh"]
+    stale_active_studio = [item for item in active_studio if item["freshness"]["status"] != "fresh"]
+    studio_state = "active" if fresh_active_studio else "uncertain" if stale_active_studio else "inactive" if studio else "unknown"
 
-    fabrication = [
-        item for item in observations
-        if any(word in item["id"].lower() for word in ("octoprint", "printer", "fabrication"))
-    ]
+    fabrication = [item for item in observations if item["source"].get("domain") == "fabrication" and item["source"].get("state_kind") in {"state", "retained"}]
     active_fabrication = [item for item in fabrication if _state(item) in {"printing", "paused", "active"}]
-    fabrication_state = "active" if active_fabrication else "inactive" if fabrication else "unknown"
+    fresh_active_fabrication = [item for item in active_fabrication if item["freshness"]["status"] == "fresh"]
+    stale_active_fabrication = [item for item in active_fabrication if item["freshness"]["status"] != "fresh"]
+    fabrication_state = "active" if fresh_active_fabrication else "uncertain" if stale_active_fabrication else "inactive" if fabrication else "unknown"
 
     stale = [item for item in observations if item["freshness"]["status"] == "stale"]
     unavailable = [item for item in observations if item["source"]["kind"] == "collector" and _state(item) == "unavailable"]
     unknown_freshness = [item for item in observations if item["freshness"]["status"] == "unknown"]
     stale_state = "unavailable" if unavailable else "stale" if stale else "unknown" if unknown_freshness else "fresh"
 
-    opportunities = bad_services + bad_systems + stale + unavailable + active_fabrication
-    return [
+    coordination = next((item for item in observations if item["source"].get("semantic") == "benlab_context"), None)
+    context = coordination.get("value", {}) if coordination and coordination["freshness"]["status"] == "fresh" else {}
+    capacity = set(context.get("capacity_projects", []))
+    affordances = [item for item in observations if item["freshness"]["status"] == "fresh" and item["source"].get("affordances")]
+    opportunities = []
+    for need in context.get("evidence_needs", []):
+        required = set(need.get("stack") or [])
+        world = next((item for item in affordances if required.issubset(set(item["source"]["affordances"]))), None)
+        if need.get("project") in capacity and world:
+            opportunities.append(_situation(
+                f"evidence-opportunity:{need['project']}", f"Evidence opportunity: {need['project']}", "available",
+                "available when a world affordance satisfies a BenLab-authored evidence need with current schedule capacity",
+                [item for item in (coordination, world) if item],
+            ))
+    result = [
         _situation("system-health", "System health", health, "degraded when a service is not running or disk use is at least 90%", health_evidence),
-        _situation("studio-activity", "Studio activity", studio_state, "active when a studio observation has an explicit active state", active_studio or studio),
-        _situation("fabrication-activity", "Fabrication activity", fabrication_state, "active when printer telemetry reports printing, paused, or active", active_fabrication or fabrication),
+        _situation("studio-activity", "Studio activity", studio_state, "fresh declared studio state may assert activity; stale active state is uncertain", fresh_active_studio or stale_active_studio or studio),
+        _situation("fabrication-activity", "Fabrication activity", fabrication_state, "fresh declared fabrication state may assert activity; events do not assert persistent state", fresh_active_fabrication or stale_active_fabrication or fabrication),
         _situation("source-staleness", "Source staleness", stale_state, "unavailable when collection fails; stale when any observation exceeds its source freshness limit", unavailable or stale or unknown_freshness or observations),
-        _situation("evidence-opportunities", "Evidence opportunities", "open" if opportunities else "none", "open for degraded health, stale or unavailable evidence, or an active fabrication run", opportunities),
+        _situation("evidence-opportunities", "Evidence opportunities", "available" if opportunities else "unknown" if not coordination else "none", "summarizes deterministic joins of world affordances, BenLab evidence needs, and current capacity", [coordination] if coordination else []),
     ]
+    return result + opportunities
 
 
-def interpret(raw: dict[str, Any]) -> dict[str, Any]:
-    observations = normalize(raw)
+def interpret(raw: dict[str, Any], registry: dict[str, Any] | None = None) -> dict[str, Any]:
+    observations = normalize(raw, registry)
     return {
         "contract": {
             "name": "homeauto-world-state",
@@ -212,13 +263,20 @@ def _record(kind: str, name: str, payload: Any, observed_at: str, freshness_seco
     }
 
 
-def collect_home_assistant(url: str, token: str) -> list[dict[str, Any]]:
+def collect_home_assistant(url: str, token: str, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     request = urllib.request.Request(url.rstrip("/") + "/api/states", headers={"Authorization": f"Bearer {token}"})
     with urllib.request.urlopen(request, timeout=10) as response:
-        return json.load(response)
+        payload = json.load(response)
+    payload = payload if isinstance(payload, list) else [payload]
+    rows = []
+    for item in payload:
+        definition = next((source for source in sources if fnmatch.fnmatchcase(item.get("entity_id", ""), source.get("match", ""))), None)
+        if definition:
+            rows.append({"entity_id": item["entity_id"], **{key: item.get(key) for key in definition.get("retain", ["state", "last_updated"])}})
+    return rows
 
 
-def collect_mqtt(host: str, topic: str = "#") -> list[dict[str, Any]]:
+def collect_mqtt(host: str, topic: str = "#", sources: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     command = ["mosquitto_sub", "-h", host, "-t", topic, "-W", "2", "-C", "100", "-F", "%t\t%p"]
     result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
     if result.returncode not in {0, 27}:
@@ -232,7 +290,8 @@ def collect_mqtt(host: str, topic: str = "#") -> list[dict[str, Any]]:
             value = json.loads(payload)
         except json.JSONDecodeError:
             value = payload
-        rows.append({"topic": topic_name, "payload": value, "state": value.get("state") if isinstance(value, dict) else value})
+        if not sources or any(_matches("mqtt", source.get("match", ""), topic_name) for source in sources):
+            rows.append({"topic": topic_name, "payload": value, "state": value.get("state") if isinstance(value, dict) else value})
     return rows
 
 
@@ -246,7 +305,9 @@ def collect_services(compose_file: Path) -> list[dict[str, Any]]:
     return [{"name": row.get("Service") or row.get("Name"), "state": row.get("State") or row.get("Status")} for row in rows]
 
 
-def collect_raw(coordination_path: Path = DEFAULT_COORDINATION, compose_file: Path = ROOT / "docker-compose.yml") -> dict[str, Any]:
+def collect_raw(coordination_path: Path = DEFAULT_COORDINATION, compose_file: Path = ROOT / "docker-compose.yml", registry: dict[str, Any] | None = None) -> dict[str, Any]:
+    registry = registry or load_registry()
+    definitions = registry.get("sources", [])
     now = datetime.now(timezone.utc).isoformat()
     sources = []
     errors = []
@@ -254,7 +315,7 @@ def collect_raw(coordination_path: Path = DEFAULT_COORDINATION, compose_file: Pa
     ha_token = os.getenv("HA_TOKEN")
     if ha_token:
         try:
-            sources.append(_record("home_assistant", "homeassistant", collect_home_assistant(ha_url, ha_token), now, 300, "household"))
+            sources.append(_record("home_assistant", "homeassistant", collect_home_assistant(ha_url, ha_token, [item for item in definitions if item.get("kind") == "home_assistant"]), now, 300, "household"))
         except Exception as exc:
             errors.append(f"home_assistant: {exc}")
     else:
@@ -262,7 +323,7 @@ def collect_raw(coordination_path: Path = DEFAULT_COORDINATION, compose_file: Pa
     mqtt_host = os.getenv("MQTT_HOST", "127.0.0.1")
     if shutil.which("mosquitto_sub"):
         try:
-            sources.append(_record("mqtt", "mosquitto", collect_mqtt(mqtt_host, os.getenv("MQTT_TOPIC", "#")), now, 300, "household", 0.8))
+            sources.append(_record("mqtt", "mosquitto", collect_mqtt(mqtt_host, os.getenv("MQTT_TOPIC", "#"), [item for item in definitions if item.get("kind") == "mqtt"]), now, 300, "household", 0.8))
         except Exception as exc:
             errors.append(f"mqtt: {exc}")
     else:

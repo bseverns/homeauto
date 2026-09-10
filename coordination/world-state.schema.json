@@ -24,8 +24,15 @@
           "id": {"type": "string"},
           "source": {
             "type": "object",
-            "required": ["kind", "name"],
-            "properties": {"kind": {"type": "string"}, "name": {"type": "string"}}
+            "required": ["kind", "name", "domain", "semantic", "state_kind"],
+            "properties": {
+              "kind": {"type": "string"},
+              "name": {"type": "string"},
+              "domain": {"type": "string"},
+              "semantic": {"type": "string"},
+              "state_kind": {"enum": ["state", "retained", "event"]},
+              "affordances": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+            }
           },
           "observed_at": {"type": ["string", "null"]},
           "freshness": {

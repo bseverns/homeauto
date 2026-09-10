@@ -78,9 +78,16 @@ the assistant does not crawl the three neighboring repositories.
   deterministic situations shown in `dashboard.md`.
 
 The contracts are [`raw-telemetry.schema.json`](./raw-telemetry.schema.json) and
-[`world-state.schema.json`](./world-state.schema.json). Each observation records its
-source, observation time, freshness, sensitivity, and confidence. Every situation
-links to observation IDs and displays its fixed rule under **Why?**.
+[`world-state.schema.json`](./world-state.schema.json); tests validate both with
+`jsonschema` from `requirements-dev.txt`. Source meaning, freshness, sensitivity,
+retained-state versus event semantics, Home Assistant field allowlists, and physical
+world affordances are declared in [`world-sources.json`](./world-sources.json).
+Unlisted Home Assistant entities are discarded before the raw artifact is written.
+Each observation records its source, observation time, freshness, sensitivity, and
+confidence. Every situation links to observation IDs and displays its fixed rule under
+**Why?**. Stale activity is `UNCERTAIN`, absent evidence is `UNKNOWN`, and evidence
+opportunities require a declared world affordance, a BenLab-owned evidence need, and
+current schedule capacity.
 
 Host and Docker Compose state are collected locally. Set `HA_URL` and `HA_TOKEN` to
 enable the read-only Home Assistant `GET /api/states` collector. Set `MQTT_HOST`

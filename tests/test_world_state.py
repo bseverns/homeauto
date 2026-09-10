@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import jsonschema
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("world_state", ROOT / "scripts" / "world_state.py")
@@ -30,13 +32,95 @@ class WorldStateTests(unittest.TestCase):
             self.assertGreaterEqual(observation["confidence"], 0)
             self.assertLessEqual(observation["confidence"], 1)
 
+    def test_raw_and_interpreted_documents_validate_against_published_schemas(self):
+        for document, schema_name in (
+            (self.raw, "raw-telemetry.schema.json"),
+            (self.state, "world-state.schema.json"),
+        ):
+            schema = json.loads((ROOT / "coordination" / schema_name).read_text())
+            jsonschema.Draft202012Validator(schema).validate(document)
+
+        failed = dict(self.raw, errors=["mqtt: unavailable"])
+        jsonschema.Draft202012Validator(
+            json.loads((ROOT / "coordination" / "world-state.schema.json").read_text())
+        ).validate(world_state.interpret(failed))
+
+    def test_stale_activity_is_uncertain_not_active(self):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"][0]["payload"][0]["last_updated"] = "2026-09-10T14:00:00+00:00"
+        situation = {item["id"]: item for item in world_state.interpret(raw)["situations"]}["studio-activity"]
+        self.assertEqual(situation["state"], "uncertain")
+        self.assertLess(situation["confidence"], 1.0)
+
+    def test_registry_declares_source_meaning_and_events_do_not_assert_state(self):
+        registry = {
+            "sources": [{
+                "kind": "mqtt", "match": "octoprint/+/state", "domain": "fabrication",
+                "semantic": "machine_activity", "state_kind": "event", "freshness_seconds": 120,
+                "sensitivity": "household",
+            }]
+        }
+        observation = next(item for item in world_state.interpret(self.raw, registry)["observations"] if item["source"]["kind"] == "mqtt")
+        situation = {item["id"]: item for item in world_state.interpret(self.raw, registry)["situations"]}["fabrication-activity"]
+        self.assertEqual(observation["source"]["semantic"], "machine_activity")
+        self.assertEqual(observation["source"]["state_kind"], "event")
+        self.assertEqual(situation["state"], "unknown")
+
+    def test_home_assistant_collection_retains_only_allowlisted_fields(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.read.return_value = json.dumps({
+            "entity_id": "binary_sensor.studio_motion", "state": "on",
+            "last_updated": "2026-09-10T14:59:30+00:00", "attributes": {"person": "private"},
+        }).encode()
+        source = {"match": "binary_sensor.studio_motion", "retain": ["state", "last_updated"]}
+        with mock.patch.object(world_state.urllib.request, "urlopen", return_value=response):
+            rows = world_state.collect_home_assistant("http://ha", "token", [source])
+        self.assertEqual(rows, [{
+            "entity_id": "binary_sensor.studio_motion", "state": "on",
+            "last_updated": "2026-09-10T14:59:30+00:00",
+        }])
+
+    def test_evidence_opportunity_joins_affordance_need_and_capacity(self):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"][4]["observed_at"] = raw["collected_at"]
+        raw["sources"][4]["payload"].update({
+            "benlab": {"now": [{
+                "project": "homeauto", "next_action": "Save an ingest receipt", "effort": "30m",
+                "stack": ["terminal", "repo"], "route": "repo_issue", "attention": "now",
+            }]},
+            "schedule": {"capacity": {"fits": [{"project": "homeauto", "temporal_status": "today"}]}},
+        })
+        registry = {"sources": [
+            {
+                "kind": "system", "match": "*", "domain": "system", "semantic": "host_health",
+                "state_kind": "state", "freshness_seconds": 120, "sensitivity": "internal",
+                "affordances": ["terminal", "repo"],
+            },
+            {
+                "kind": "coordination", "match": "*", "domain": "coordination",
+                "semantic": "benlab_context", "state_kind": "state",
+                "freshness_seconds": 900, "sensitivity": "private",
+            },
+        ]}
+        situations = {item["id"]: item for item in world_state.interpret(raw, registry)["situations"]}
+        opportunity = situations["evidence-opportunity:homeauto"]
+        self.assertEqual(opportunity["state"], "available")
+        self.assertIn("BenLab", opportunity["rule"])
+        self.assertIn("system:collector-host:0", opportunity["evidence"])
+
+        raw["sources"][4]["observed_at"] = "2026-09-10T14:00:00+00:00"
+        stale_situations = {item["id"]: item for item in world_state.interpret(raw, registry)["situations"]}
+        self.assertNotIn("evidence-opportunity:homeauto", stale_situations)
+
     def test_rules_derive_health_activity_fabrication_staleness_and_opportunities(self):
         situations = {item["id"]: item for item in self.state["situations"]}
         self.assertEqual(situations["system-health"]["state"], "degraded")
         self.assertEqual(situations["studio-activity"]["state"], "active")
         self.assertEqual(situations["fabrication-activity"]["state"], "active")
         self.assertEqual(situations["source-staleness"]["state"], "stale")
-        self.assertEqual(situations["evidence-opportunities"]["state"], "open")
+        self.assertEqual(situations["evidence-opportunities"]["state"], "none")
         self.assertTrue(all(item["evidence"] for item in situations.values()))
         self.assertTrue(all(item["rule"] for item in situations.values()))
 
@@ -49,7 +133,7 @@ class WorldStateTests(unittest.TestCase):
         )
         self.assertEqual(
             set(coordination["value"]),
-            {"generated_at", "source_availability", "warning_count", "directive_count"},
+            {"generated_at", "source_availability", "warning_count", "directive_count", "evidence_needs", "capacity_projects"},
         )
         evidence_ids = {item["id"] for item in self.state["observations"]}
         self.assertEqual(self.state["contract"]["authority"], "read-only; no control actions")
