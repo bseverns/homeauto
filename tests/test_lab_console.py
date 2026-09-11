@@ -21,7 +21,7 @@ class LabConsoleTests(unittest.TestCase):
         registry = lab_console.load_routines(ROOT / "coordination" / "routines.json")
         self.assertEqual(
             set(registry),
-            {"daily", "weekly", "monthly", "refresh", "ask", "benlab-refresh", "analyst-scan", "capacity", "latest"},
+            {"daily", "weekly", "monthly", "refresh", "ask", "benlab-refresh", "analyst-scan", "analyst-readonly", "analyst-write", "capacity", "latest"},
         )
         for routine in registry.values():
             self.assertIsInstance(routine["command"], list)
@@ -160,6 +160,62 @@ class LabConsoleTests(unittest.TestCase):
             )
 
             self.assertEqual(Path(receipt["artifact"]).read_text(), "$HOME/material")
+
+    def test_analyst_arguments_and_model_are_passed_as_literal_argv(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$OLLAMA_CHAT_MODEL\" \"$@\"\n",
+                encoding="utf-8",
+            )
+            adapter.chmod(0o755)
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "analyst-readonly", "label": "Analyst", "description": "Test", "target": "test",
+                "adapter": str(adapter), "cwd": ".", "command": ["{args}"], "read_only": True,
+                "requires_confirmation": False, "expected_output": "text", "duration": "brief",
+                "interaction": "none",
+            }]}), encoding="utf-8")
+
+            receipt = lab_console.run_routine(
+                "analyst-readonly", registry_path, root / "receipts",
+                arguments=["find", "$HOME; touch /tmp/nope", "--limit", "10"],
+                environment={"OLLAMA_CHAT_MODEL": "gpt-oss:20b"},
+                refresh_world_state=False,
+            )
+
+            self.assertEqual(
+                Path(receipt["artifact"]).read_text().splitlines(),
+                ["gpt-oss:20b", "find", "$HOME; touch /tmp/nope", "--limit", "10"],
+            )
+
+    def test_analyst_write_policy_matches_cli_side_effects(self):
+        self.assertFalse(lab_console.analyst_requires_confirmation(["find", "query"]))
+        self.assertFalse(lab_console.analyst_requires_confirmation(["scan", "--help"]))
+        self.assertFalse(lab_console.analyst_requires_confirmation(["benlab-tend", "--context", "context.json"]))
+        self.assertFalse(lab_console.analyst_requires_confirmation(["benlab-challenge", "--project", "project"]))
+        self.assertFalse(lab_console.analyst_requires_confirmation(["benlab-connect", "--note", "note"]))
+        self.assertFalse(lab_console.analyst_requires_confirmation(["migrate-cards", "--to-schema", "2", "--dry-run"]))
+        self.assertTrue(lab_console.analyst_requires_confirmation(["scan", "--root", "/tmp/research"]))
+        self.assertTrue(lab_console.analyst_requires_confirmation(["migrate-cards", "--to-schema", "2"]))
+        self.assertTrue(lab_console.analyst_requires_confirmation(["migrate-candidate-markers", "--apply"]))
+        with self.assertRaisesRegex(ValueError, "spell --apply in full"):
+            lab_console.analyst_requires_confirmation(["migrate-candidate-markers", "--app"])
+        with self.assertRaisesRegex(ValueError, "unknown Analyst command"):
+            lab_console.analyst_requires_confirmation(["future-command"])
+
+    def test_analyst_cli_keeps_run_specific_values_dynamic(self):
+        args = lab_console.parse_args([
+            "analyst", "--model", "gemma4:12b", "find", "Beneath the information", "--limit", "10",
+        ])
+        self.assertEqual(args.model, "gemma4:12b")
+        self.assertEqual(args.arguments, ["find", "Beneath the information", "--limit", "10"])
+        write_args = lab_console.parse_args(["analyst", "scan", "--root", "/tmp/research", "--yes"])
+        self.assertTrue(write_args.yes)
+        self.assertEqual(write_args.arguments, ["scan", "--root", "/tmp/research"])
+        with self.assertRaises(SystemExit):
+            lab_console.parse_args(["analyst", "--model", "bad model", "find", "query"])
 
     def test_failed_process_start_is_recorded_truthfully(self):
         with tempfile.TemporaryDirectory() as temporary:

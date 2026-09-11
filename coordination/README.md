@@ -120,6 +120,11 @@ scripts/lab-console run refresh
 scripts/lab-console run benlab-refresh
 scripts/lab-console run capacity
 scripts/lab-console run analyst-scan --input /path/to/material --yes
+scripts/lab-console analyst find "current query" --limit 10
+scripts/lab-console analyst --model gemma4:12b ask "current question"
+scripts/lab-console analyst scan --root /path/selected/for/this/run --yes
+scripts/lab-console analyst export-benlab-intake --context /path/to/context --yes
+scripts/lab-console analyst import-syntheses --file /path/to/syntheses.json --yes
 scripts/lab-console run latest
 scripts/lab-console open dashboard
 scripts/lab-console open benlab

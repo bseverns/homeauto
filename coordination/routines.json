@@ -101,6 +101,34 @@
       "interaction": "batch"
     },
     {
+      "id": "analyst-readonly",
+      "label": "Query local Analyst",
+      "description": "Run an allowlisted, non-writing benlab-local-analyst command with invocation-time arguments.",
+      "target": "benlab-local-analyst",
+      "adapter": "coordination/adapters/command",
+      "cwd": "../benlab-local-analyst",
+      "command": [".venv/bin/python", "-m", "benlab_analyst", "{args}"],
+      "read_only": true,
+      "requires_confirmation": false,
+      "expected_output": "Analyst stdout plus a homeauto-owned receipt and captured output artifact.",
+      "duration": "varies",
+      "interaction": "none"
+    },
+    {
+      "id": "analyst-write",
+      "label": "Update local Analyst",
+      "description": "Run an allowlisted benlab-local-analyst command that may change Analyst-owned data.",
+      "target": "benlab-local-analyst",
+      "adapter": "coordination/adapters/command",
+      "cwd": "../benlab-local-analyst",
+      "command": [".venv/bin/python", "-m", "benlab_analyst", "{args}"],
+      "read_only": false,
+      "requires_confirmation": true,
+      "expected_output": "Analyst-owned changes, stdout, and a homeauto-owned receipt and captured output artifact.",
+      "duration": "varies",
+      "interaction": "none"
+    },
+    {
       "id": "capacity",
       "label": "Capacity Assessment",
       "description": "Run schedule-assessment's existing capacity refresh.",

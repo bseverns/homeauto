@@ -33,6 +33,15 @@ ACTION_TYPES = (
     "repo_action",
     "note",
 )
+ANALYST_COMMANDS = frozenset({
+    "scan", "find", "path", "read", "ask", "export-benlab-intake", "import-syntheses",
+    "migrate-cards", "migrate-candidate-markers", "benlab-tend", "benlab-challenge",
+    "benlab-connect", "benlab-propose", "batch-rebuild",
+})
+ANALYST_WRITE_COMMANDS = {
+    "scan", "read", "export-benlab-intake", "import-syntheses", "migrate-cards",
+    "migrate-candidate-markers", "batch-rebuild",
+}
 
 
 def utc_now() -> str:
@@ -281,12 +290,36 @@ def load_routine_receipts(directory: Path = ROUTINE_RECEIPTS_DIR) -> tuple[list[
     return receipts, errors
 
 
+def analyst_requires_confirmation(arguments: list[str]) -> bool:
+    if not arguments or arguments[0] not in ANALYST_COMMANDS:
+        command = arguments[0] if arguments else ""
+        raise ValueError(f"unknown Analyst command: {command or '(missing)'}")
+    command = arguments[0]
+    if "--help" in arguments[1:]:
+        return False
+    if command == "migrate-cards" and "--dry-run" in arguments[1:]:
+        return False
+    if command == "migrate-candidate-markers":
+        if any("--apply".startswith(argument) and argument != "--apply" for argument in arguments[1:]):
+            raise ValueError("spell --apply in full")
+        return "--apply" in arguments[1:]
+    return command in ANALYST_WRITE_COMMANDS
+
+
+def analyst_model(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", value):
+        raise argparse.ArgumentTypeError("model must contain only letters, digits, . _ : / or -")
+    return value
+
+
 def run_routine(
     routine_id: str,
     registry_path: Path = ROUTINES_PATH,
     receipt_dir: Path = ROUTINE_RECEIPTS_DIR,
     *,
     input_value: str | None = None,
+    arguments: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     confirmed: bool = False,
     refresh_world_state: bool = True,
 ) -> dict[str, Any]:
@@ -300,6 +333,13 @@ def run_routine(
     command = []
     for argument in routine["command"]:
         argument = os.path.expandvars(argument)
+        if argument == "{args}":
+            if arguments is None:
+                raise ValueError(f"{routine_id} requires command arguments")
+            command.extend(arguments)
+            continue
+        if "{args}" in argument:
+            raise ValueError(f"{routine_id} must use {{args}} as a complete argv element")
         if "{input}" in argument:
             if not input_value:
                 raise ValueError(f"{routine_id} requires --input")
@@ -335,11 +375,14 @@ def run_routine(
     if not cwd.is_absolute():
         cwd = ROOT / cwd
     try:
+        run_options: dict[str, Any] = {"cwd": cwd, "check": False}
+        if environment:
+            run_options["env"] = {**os.environ, **environment}
         if routine["interaction"] == "guided":
-            completed = subprocess.run([str(adapter), *command], cwd=cwd, check=False)
+            completed = subprocess.run([str(adapter), *command], **run_options)
         else:
             completed = subprocess.run(
-                [str(adapter), *command], cwd=cwd, check=False,
+                [str(adapter), *command], **run_options,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
         receipt["started"] = True
@@ -374,6 +417,18 @@ def run_routine(
     if refresh_world_state:
         write_snapshot(DEFAULT_CONFIG)
     return receipt
+
+
+def run_analyst(arguments: list[str], model: str | None, confirmed: bool) -> dict[str, Any]:
+    writes = analyst_requires_confirmation(arguments)
+    if writes and not confirmed:
+        raise PermissionError(f"Analyst {arguments[0]} writes data; repeat with --yes")
+    return run_routine(
+        "analyst-write" if writes else "analyst-readonly",
+        arguments=arguments,
+        environment={"OLLAMA_CHAT_MODEL": model} if model else None,
+        confirmed=confirmed,
+    )
 
 
 def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
@@ -450,6 +505,7 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         "| Encounter<br>`lab-console run daily` | Connect<br>`lab-console run weekly` | Reorient<br>`lab-console run monthly` | Refresh<br>`lab-console run refresh` |",
         "",
         "Ask: `lab-console ask \"What changed since yesterday?\"`",
+        "Analyst CLI: `lab-console analyst --help` (queries and paths stay in each invocation)",
         "",
         "## Tentacles",
         "",
@@ -786,6 +842,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("routine")
     run.add_argument("--input", help="explicit input required by parameterized routines")
     run.add_argument("--yes", action="store_true", help="confirm a routine that requires confirmation")
+    analyst = subparsers.add_parser(
+        "analyst",
+        help="invoke an allowlisted benlab-local-analyst command",
+        description="commands: " + ", ".join(sorted(ANALYST_COMMANDS)),
+    )
+    analyst.add_argument("--model", type=analyst_model, help="temporary OLLAMA_CHAT_MODEL override")
+    analyst.add_argument("--yes", action="store_true", help="confirm a command that writes Analyst-owned data")
+    analyst.add_argument("arguments", nargs=argparse.REMAINDER, help="Analyst command and its arguments")
     ask = subparsers.add_parser("ask", help="ask the local assistant about structured state")
     ask.add_argument("question")
     create = subparsers.add_parser("new-directive", help="create an inert draft directive")
@@ -795,7 +859,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     create.add_argument("--rationale", default="")
     create.add_argument("--source", action="append", default=[], dest="source_refs")
     create.add_argument("--constraint", action="append", default=[], dest="constraints")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "analyst" and "--yes" in args.arguments:
+        args.yes = True
+        args.arguments = [argument for argument in args.arguments if argument != "--yes"]
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -831,6 +899,14 @@ def main(argv: list[str] | None = None) -> int:
         confirmed = args.yes if args.command == "run" else False
         try:
             receipt = run_routine(routine_id, input_value=input_value, confirmed=confirmed)
+        except (ValueError, PermissionError) as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        print(json.dumps(receipt, indent=2))
+        return 0 if receipt["result"] == "completed" and receipt["refreshed_world_state"] else 1
+    if args.command == "analyst":
+        try:
+            receipt = run_analyst(args.arguments, args.model, args.yes)
         except (ValueError, PermissionError) as exc:
             print(exc, file=sys.stderr)
             return 2
