@@ -386,11 +386,11 @@ def render_situations(state: dict[str, Any]) -> str:
     lines = ["## World situations", "", "| Situation | State | Confidence |", "| --- | --- | --- |"]
     for item in state.get("situations", []):
         lines.append(f"| {item['label']} | {item['state']} | {item['confidence']:.2f} |")
-        lines.extend(["", f"<details><summary>Why? {item['label']}</summary>", "", f"Rule: {item['rule']}", ""])
+        lines.extend(["", f"#### Why? {item['label']}", "", f"Rule: {item['rule']}", ""])
         lines.extend(f"- {reason}" for reason in item.get("why", []))
         if not item.get("why"):
             lines.append("- No matching observations.")
-        lines.extend(["", "</details>"])
+        lines.append("")
     lines.extend(["", "### World-state boundaries", ""])
     lines.extend(f"- {boundary}" for boundary in state.get("boundaries", []))
     return "\n".join(lines) + "\n"

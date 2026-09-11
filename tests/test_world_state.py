@@ -378,6 +378,7 @@ class WorldStateTests(unittest.TestCase):
         dashboard = world_state.render_situations(self.state)
         self.assertIn("## World situations", dashboard)
         self.assertIn("Why?", dashboard)
+        self.assertNotIn("<details", dashboard)
         self.assertIn("mosquitto", dashboard)
         self.assertIn("does not create, approve, or dispatch directives", dashboard)
 

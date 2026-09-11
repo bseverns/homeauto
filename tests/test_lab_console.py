@@ -113,6 +113,13 @@ class LabConsoleTests(unittest.TestCase):
                 "result": "completed",
                 "target": "benlab",
             }],
+            "world_state": {"situations": [{
+                "label": "System health",
+                "state": "healthy",
+                "confidence": 1,
+                "rule": "fresh evidence",
+                "why": ["system = observed"],
+            }]},
             "warnings": [],
             "boundaries": [],
         })
@@ -122,6 +129,8 @@ class LabConsoleTests(unittest.TestCase):
         self.assertIn("[BenLab details](file:///tmp/benlab-actions.json)", dashboard)
         self.assertIn("`lab-console run benlab-refresh`", dashboard)
         self.assertIn("Weekly Connect", dashboard)
+        self.assertIn("#### Why? System health", dashboard)
+        self.assertNotIn("<details", dashboard)
 
     def test_dashboard_cells_escape_html_and_markdown_tables(self):
         self.assertEqual(lab_console.cell("<script>|private</script>"), "&lt;script&gt;\\|private&lt;/script&gt;")
