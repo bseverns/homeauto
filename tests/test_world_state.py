@@ -405,6 +405,22 @@ class WorldStateTests(unittest.TestCase):
         self.assertEqual(raw["contract"]["name"], "homeauto-raw-telemetry")
         self.assertNotIn("secret", json.dumps(raw))
 
+    def test_unconfigured_optional_collectors_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination = Path(tmp) / "snapshot.json"
+            coordination.write_text(json.dumps({"generated_at": "2026-09-10T15:00:00+00:00"}))
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch.object(world_state.shutil, "which", return_value=None),
+            ):
+                raw = world_state.collect_raw(coordination, Path("compose.yml"))
+
+        self.assertEqual(raw["errors"], [])
+        self.assertEqual(
+            {record["source"]["kind"] for record in raw["sources"]},
+            {"system", "coordination"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -462,20 +462,19 @@ def collect_raw(coordination_path: Path = DEFAULT_COORDINATION, compose_file: Pa
             sources.append(_record("home_assistant", "homeassistant", collect_home_assistant(ha_url, ha_token, [item for item in definitions if item.get("kind") == "home_assistant"]), now, 300, "household"))
         except Exception as exc:
             errors.append(f"home_assistant: {exc}")
-    else:
-        errors.append("home_assistant: HA_TOKEN not configured")
-    mqtt_host = os.getenv("MQTT_HOST", "127.0.0.1")
-    if shutil.which("mosquitto_sub"):
+    mqtt_host = os.getenv("MQTT_HOST")
+    if mqtt_host and shutil.which("mosquitto_sub"):
         try:
             sources.append(_record("mqtt", "mosquitto", collect_mqtt(mqtt_host, os.getenv("MQTT_TOPIC", "#"), [item for item in definitions if item.get("kind") == "mqtt"]), now, 300, "household", 0.8))
         except Exception as exc:
             errors.append(f"mqtt: {exc}")
-    else:
+    elif mqtt_host:
         errors.append("mqtt: mosquitto_sub is not installed")
-    try:
-        sources.append(_record("service", "docker-compose", collect_services(compose_file), now, 120, "internal"))
-    except Exception as exc:
-        errors.append(f"service: {exc}")
+    if shutil.which("docker"):
+        try:
+            sources.append(_record("service", "docker-compose", collect_services(compose_file), now, 120, "internal"))
+        except Exception as exc:
+            errors.append(f"service: {exc}")
     disk = shutil.disk_usage(ROOT)
     sources.append(_record("system", socket.gethostname(), {"disk_used_percent": round((disk.used / disk.total) * 100, 1), "load_1m": os.getloadavg()[0]}, now, 120, "internal"))
     if coordination_path.is_file():

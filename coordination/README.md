@@ -83,6 +83,8 @@ The contracts are [`raw-telemetry.schema.json`](./raw-telemetry.schema.json) and
 retained-state versus event semantics, Home Assistant field allowlists, and physical
 world affordances are declared in [`world-sources.json`](./world-sources.json).
 Unlisted Home Assistant entities are discarded before the raw artifact is written.
+Home Assistant and MQTT are optional: set `HA_TOKEN` or `MQTT_HOST` to enable
+their collectors. Docker service health is collected only when Docker is installed.
 
 [`studio-machines.json`](./studio-machines.json) is the deliberately small membership
 list for machines shown in the control deck; its contract is
