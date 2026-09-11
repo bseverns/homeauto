@@ -1,0 +1,4 @@
+#!/bin/sh
+# A routine supplies argv; this adapter adds no target logic.
+set -eu
+exec "$@"

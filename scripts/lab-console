@@ -7,7 +7,9 @@ import argparse
 import csv
 import html
 import json
+import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -19,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "coordination" / "sources.json"
 DIRECTIVES_DIR = ROOT / "coordination" / "directives"
 WORLD_STATE_PATH = ROOT / "coordination" / "state" / "world-state.json"
+ROUTINES_PATH = ROOT / "coordination" / "routines.json"
+ROUTINE_RECEIPTS_DIR = ROOT / "coordination" / "state" / "routine-receipts"
 TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
 ACTION_TYPES = (
     "review_candidate",
@@ -245,6 +249,133 @@ def load_directives(directory: Path = DIRECTIVES_DIR) -> tuple[list[dict[str, An
     return directives, errors
 
 
+def load_routines(path: Path = ROUTINES_PATH) -> dict[str, dict[str, Any]]:
+    payload = read_json(path)
+    routines = {}
+    required = {
+        "id", "label", "description", "target", "adapter", "cwd", "command",
+        "read_only", "requires_confirmation", "expected_output", "duration", "interaction",
+    }
+    for routine in payload.get("routines", []):
+        missing = required - routine.keys()
+        if missing:
+            raise ValueError(f"routine missing fields: {', '.join(sorted(missing))}")
+        routine_id = routine["id"]
+        if routine_id in routines:
+            raise ValueError(f"duplicate routine id: {routine_id}")
+        if not isinstance(routine["command"], list) or not routine["command"]:
+            raise ValueError(f"routine {routine_id} command must be a non-empty argv list")
+        routines[routine_id] = routine
+    return routines
+
+
+def load_routine_receipts(directory: Path = ROUTINE_RECEIPTS_DIR) -> tuple[list[dict[str, Any]], list[str]]:
+    receipts, errors = [], []
+    if not directory.exists():
+        return receipts, errors
+    for path in sorted(directory.glob("*.json"), reverse=True)[:100]:
+        try:
+            receipts.append(read_json(path))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path.name}: {exc}")
+    return receipts, errors
+
+
+def run_routine(
+    routine_id: str,
+    registry_path: Path = ROUTINES_PATH,
+    receipt_dir: Path = ROUTINE_RECEIPTS_DIR,
+    *,
+    input_value: str | None = None,
+    confirmed: bool = False,
+    refresh_world_state: bool = True,
+) -> dict[str, Any]:
+    routines = load_routines(registry_path)
+    if routine_id not in routines:
+        raise ValueError(f"unknown routine: {routine_id}")
+    routine = routines[routine_id]
+    if routine["requires_confirmation"] and not confirmed:
+        raise PermissionError(f"{routine_id} requires confirmation; repeat with --yes")
+
+    command = []
+    for argument in routine["command"]:
+        argument = os.path.expandvars(argument)
+        if "{input}" in argument:
+            if not input_value:
+                raise ValueError(f"{routine_id} requires --input")
+            argument = argument.replace("{input}", input_value)
+        command.append(argument)
+
+    now = datetime.now(timezone.utc)
+    receipt_id = f"{now.strftime('%Y%m%dT%H%M%S.%fZ')}-{routine_id}"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_path = receipt_dir / f"{receipt_id}.json"
+    artifact_path = receipt_dir.parent / "routine-artifacts" / f"{receipt_id}.txt"
+    receipt = {
+        "contract_version": 1,
+        "id": receipt_id,
+        "routine": routine_id,
+        "label": routine["label"],
+        "requested_at": now.isoformat(),
+        "requested_by": "human",
+        "target": routine["target"],
+        "started": False,
+        "result": "running",
+        "artifact": None,
+        "exit_code": None,
+        "refreshed_world_state": False,
+        "refresh_exit_code": None,
+    }
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    adapter = Path(routine["adapter"])
+    if not adapter.is_absolute():
+        adapter = ROOT / adapter
+    cwd = Path(os.path.expandvars(routine["cwd"]))
+    if not cwd.is_absolute():
+        cwd = ROOT / cwd
+    try:
+        if routine["interaction"] == "guided":
+            completed = subprocess.run([str(adapter), *command], cwd=cwd, check=False)
+        else:
+            completed = subprocess.run(
+                [str(adapter), *command], cwd=cwd, check=False,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+        receipt["started"] = True
+        receipt["exit_code"] = completed.returncode
+        receipt["result"] = "completed" if completed.returncode == 0 else "failed"
+        if routine["interaction"] != "guided":
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_path.write_text(completed.stdout or "", encoding="utf-8")
+            print(completed.stdout or "", end="")
+            receipt["artifact"] = str(artifact_path)
+    except OSError as exc:
+        receipt["result"] = "failed"
+        receipt["error"] = str(exc)
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    if refresh_world_state and receipt["result"] == "completed":
+        refresh_command = (
+            [str(ROOT / "scripts" / "lab-console"), "refresh"]
+            if routine_id == "refresh"
+            else ["arch", "-arm64", "/usr/bin/make", "coordination-refresh"]
+        )
+        try:
+            refreshed = subprocess.run(refresh_command, cwd=ROOT, check=False)
+            receipt["refresh_exit_code"] = refreshed.returncode
+            receipt["refreshed_world_state"] = refreshed.returncode == 0
+            if refreshed.returncode != 0:
+                receipt["result"] = "refresh-failed"
+        except OSError as exc:
+            receipt["result"] = "refresh-failed"
+            receipt["refresh_error"] = str(exc)
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    if refresh_world_state:
+        write_snapshot(DEFAULT_CONFIG)
+    return receipt
+
+
 def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     config = read_json(config_path)
     specs = config.get("sources", {})
@@ -263,7 +394,9 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
             return None
 
     directives, directive_errors = load_directives()
+    routine_receipts, receipt_errors = load_routine_receipts()
     warnings.extend(directive_errors)
+    warnings.extend(receipt_errors)
     snapshot = {
         "contract": {
             "name": "benlab-operator-snapshot",
@@ -279,6 +412,7 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
             "freshness": load_summary("schedule_freshness", summarize_freshness),
         },
         "directives": directives,
+        "routine_receipts": routine_receipts,
         "world_state": read_json(WORLD_STATE_PATH) if WORLD_STATE_PATH.is_file() else None,
         "warnings": warnings,
         "boundaries": [
@@ -296,7 +430,8 @@ def cell(value: Any) -> str:
         return "—"
     if isinstance(value, list):
         value = ", ".join(str(item) for item in value)
-    return html.escape(str(value)).replace("|", "\\|").replace("\n", " ")
+    escaped = html.escape(str(value)).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return re.sub(r"([\\`*_\[\]()!|])", r"\\\1", escaped)
 
 
 def render_dashboard(snapshot: dict[str, Any]) -> str:
@@ -308,11 +443,52 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         "> Read-only orientation surface. Analyst candidates are not commitments; capacity",
         "> fits are not calendar events; directives are inert until explicitly reviewed.",
         "",
-        "## Source health",
+        "## Operator",
         "",
-        "| Source | Available | Source generated | File modified (UTC) |",
+        "| Today | This week | This month | Now |",
         "| --- | --- | --- | --- |",
+        "| Encounter<br>`lab-console run daily` | Connect<br>`lab-console run weekly` | Reorient<br>`lab-console run monthly` | Refresh<br>`lab-console run refresh` |",
+        "",
+        "Ask: `lab-console ask \"What changed since yesterday?\"`",
+        "",
+        "## Tentacles",
+        "",
     ]
+    for source_name, label, target, routine_id in (
+        ("benlab_actions", "BenLab", "benlab", "benlab-refresh"),
+        ("analyst_promotions", "Analyst", "analyst", "analyst-scan"),
+        ("schedule_capacity", "Capacity", "capacity", "capacity"),
+    ):
+        source = snapshot.get("sources", {}).get(source_name, {})
+        if source.get("available") and source.get("configured_path"):
+            lines.append(
+                f"- [{label} details]({resolve_path(source['configured_path']).as_uri()}) · "
+                f"`lab-console open {target}` · `lab-console run {routine_id}`"
+            )
+    lines.extend([
+        "",
+        "## Recent activity",
+        "",
+        "| Routine | Result | Requested | Target |",
+        "| --- | --- | --- | --- |",
+    ])
+    receipts = snapshot.get("routine_receipts", [])[:10]
+    lines.extend(
+        f"| {cell(item.get('label') or item.get('routine'))} | {cell(item.get('result'))} | "
+        f"{cell(item.get('requested_at'))} | {cell(item.get('target'))} |"
+        for item in receipts
+    )
+    if not receipts:
+        lines.append("| — | not run | — | — |")
+    lines.extend(
+        [
+            "",
+            "## Source health",
+            "",
+            "| Source | Available | Source generated | File modified (UTC) |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
     generated = {
         "benlab_actions": (snapshot.get("benlab") or {}).get("generated_at"),
         "analyst_promotions": (snapshot.get("analyst") or {}).get("generated_at"),
@@ -528,6 +704,22 @@ def output_paths(config_path: Path) -> tuple[Path, Path]:
     return resolve_path(outputs["snapshot"]), resolve_path(outputs["dashboard"])
 
 
+def open_target(target: str, config_path: Path) -> None:
+    config = read_json(config_path)
+    if target == "dashboard":
+        path = output_paths(config_path)[1]
+    else:
+        source = {
+            "benlab": "benlab_actions",
+            "analyst": "analyst_promotions",
+            "capacity": "schedule_capacity",
+        }[target]
+        path = resolve_path(config.get("sources", {})[source]["path"])
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    subprocess.run(["open", str(path)], check=True)
+
+
 def write_snapshot(config_path: Path) -> tuple[Path, Path, dict[str, Any]]:
     snapshot = build_snapshot(config_path)
     snapshot_path, dashboard_path = output_paths(config_path)
@@ -587,6 +779,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("refresh", help="write the local snapshot and dashboard")
     subparsers.add_parser("status", help="print a fresh dashboard without writing it")
+    open_parser = subparsers.add_parser("open", help="open the dashboard or a detailed source view")
+    open_parser.add_argument("target", choices=("dashboard", "benlab", "analyst", "capacity"), default="dashboard", nargs="?")
+    subparsers.add_parser("routines", help="list registered operator routines")
+    run = subparsers.add_parser("run", help="invoke a registered routine")
+    run.add_argument("routine")
+    run.add_argument("--input", help="explicit input required by parameterized routines")
+    run.add_argument("--yes", action="store_true", help="confirm a routine that requires confirmation")
+    ask = subparsers.add_parser("ask", help="ask the local assistant about structured state")
+    ask.add_argument("question")
     create = subparsers.add_parser("new-directive", help="create an inert draft directive")
     create.add_argument("target", choices=TARGETS)
     create.add_argument("instruction")
@@ -612,6 +813,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         print(render_dashboard(build_snapshot(config_path)), end="")
         return 0
+    if args.command == "open":
+        try:
+            open_target(args.target, config_path)
+        except (KeyError, OSError, subprocess.CalledProcessError) as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return 0
+    if args.command == "routines":
+        for routine in load_routines().values():
+            confirmation = "confirmation" if routine["requires_confirmation"] else "direct"
+            print(f"{routine['id']:<16} {routine['label']} [{confirmation}; {routine['duration']}]")
+        return 0
+    if args.command in {"run", "ask"}:
+        routine_id = args.routine if args.command == "run" else "ask"
+        input_value = args.input if args.command == "run" else args.question
+        confirmed = args.yes if args.command == "run" else False
+        try:
+            receipt = run_routine(routine_id, input_value=input_value, confirmed=confirmed)
+        except (ValueError, PermissionError) as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        print(json.dumps(receipt, indent=2))
+        return 0 if receipt["result"] == "completed" and receipt["refreshed_world_state"] else 1
     if args.command == "new-directive":
         path = create_directive(
             DIRECTIVES_DIR,

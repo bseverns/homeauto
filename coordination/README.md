@@ -101,6 +101,41 @@ masquerade as ready production resources. Capability summaries are derived from 
 machine rows and retain machine IDs as evidence. Machine readiness changes share the
 existing 100-entry bounded transition history; raw telemetry changes are not recorded.
 
+## Operator routines
+
+`routines.json` owns stable launcher IDs and declarative invocation metadata; called
+scripts remain owned by BenLab, benlab-local-analyst, schedule-assessment, the
+assistant, or homeauto. JSON reuses the existing coordination-registry parser and
+avoids a new YAML runtime dependency. The adapter passes an argv list directly
+without a shell, so user input remains one argument rather than executable syntax.
+
+```sh
+scripts/lab-console routines
+scripts/lab-console run daily
+scripts/lab-console run weekly
+scripts/lab-console run monthly
+scripts/lab-console run refresh
+scripts/lab-console run benlab-refresh
+scripts/lab-console run capacity
+scripts/lab-console run analyst-scan --input /path/to/material --yes
+scripts/lab-console run latest
+scripts/lab-console open dashboard
+scripts/lab-console open benlab
+scripts/lab-console open analyst
+scripts/lab-console open capacity
+scripts/lab-console ask "What became possible today?"
+```
+
+Each invocation writes a receipt and, for non-guided output, a text artifact under
+the ignored `coordination/state/` tree. Completed routines trigger the existing
+coordination refresh; the dashboard includes the four cadence shortcuts, recent
+receipts, and clickable local links to the three source-owned detail artifacts.
+`open` uses the native macOS viewer and never executes source content. `read_only`
+means the routine does not mutate source material or dispatch
+control actions; derived reports, receipts, and refreshed state may still be written.
+Daily and weekly are non-read-only because the existing guided BenLab script writes
+canonical practice notes.
+
 Each observation records its source, observation time, freshness, sensitivity, and
 confidence. Every situation links to observation IDs and displays its fixed rule under
 **Why?**. Health is `DEGRADED` from fresh bad evidence, `HEALTHY` from fresh all-good

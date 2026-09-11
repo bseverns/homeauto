@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeauto.local/schemas/routines.schema.json",
+  "type": "object",
+  "required": ["contract_version", "routines"],
+  "properties": {
+    "contract_version": {"const": 1},
+    "routines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "description", "target", "adapter", "cwd", "command", "read_only", "requires_confirmation", "expected_output", "duration", "interaction"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "label": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "adapter": {"type": "string", "minLength": 1},
+          "cwd": {"type": "string", "minLength": 1},
+          "command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "read_only": {"type": "boolean"},
+          "requires_confirmation": {"type": "boolean"},
+          "expected_output": {"type": "string", "minLength": 1},
+          "duration": {"type": "string", "minLength": 1},
+          "interaction": {"enum": ["none", "guided", "assistant", "batch"]}
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

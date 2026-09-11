@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,8 +17,222 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    def test_routine_registry_has_operator_shortcuts(self):
+        registry = lab_console.load_routines(ROOT / "coordination" / "routines.json")
+        self.assertEqual(
+            set(registry),
+            {"daily", "weekly", "monthly", "refresh", "ask", "benlab-refresh", "analyst-scan", "capacity", "latest"},
+        )
+        for routine in registry.values():
+            self.assertIsInstance(routine["command"], list)
+            self.assertIn("read_only", routine)
+            self.assertIn("requires_confirmation", routine)
+            self.assertIn("expected_output", routine)
+
+    def test_open_uses_native_viewer_for_known_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dashboard = root / "state" / "dashboard.md"
+            dashboard.parent.mkdir()
+            dashboard.write_text("dashboard")
+            detail = root / "analyst-promotions.json"
+            detail.write_text("{}")
+            config = root / "sources.json"
+            config.write_text(json.dumps({
+                "sources": {
+                    "analyst_promotions": {"path": str(detail)}
+                },
+                "outputs": {
+                    "snapshot": str(root / "state" / "snapshot.json"),
+                    "dashboard": str(dashboard),
+                },
+            }))
+
+            with mock.patch.object(
+                lab_console.subprocess, "run"
+            ) as run:
+                lab_console.open_target("dashboard", config)
+                lab_console.open_target("analyst", config)
+
+            self.assertEqual(
+                run.call_args_list,
+                [
+                    mock.call(["open", str(dashboard)], check=True),
+                    mock.call(["open", str(detail)], check=True),
+                ],
+            )
+
+    def test_run_routine_uses_adapter_and_writes_completed_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text("#!/bin/sh\nprintf 'artifact output\\n'\n", encoding="utf-8")
+            adapter.chmod(0o755)
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "sample",
+                "label": "Sample",
+                "description": "Test routine",
+                "target": "test",
+                "adapter": str(adapter),
+                "cwd": ".",
+                "command": ["ignored"],
+                "read_only": True,
+                "requires_confirmation": False,
+                "expected_output": "text",
+                "duration": "brief",
+                "interaction": "none",
+            }]}), encoding="utf-8")
+
+            receipt = lab_console.run_routine(
+                "sample", registry_path, root / "receipts", refresh_world_state=False
+            )
+
+            self.assertEqual(receipt["result"], "completed")
+            self.assertTrue(receipt["started"])
+            self.assertEqual(receipt["requested_by"], "human")
+            self.assertEqual(Path(receipt["artifact"]).read_text(), "artifact output\n")
+            stored = json.loads(next((root / "receipts").glob("*.json")).read_text())
+            self.assertEqual(stored, receipt)
+
+    def test_dashboard_lists_recent_routine_receipts(self):
+        dashboard = lab_console.render_dashboard({
+            "generated_at": "2026-09-10T00:00:00+00:00",
+            "sources": {
+                "benlab_actions": {
+                    "available": True,
+                    "configured_path": "/tmp/benlab-actions.json",
+                }
+            },
+            "schedule": {},
+            "directives": [],
+            "routine_receipts": [{
+                "routine": "weekly",
+                "label": "Weekly Connect",
+                "requested_at": "2026-09-09T00:00:00+00:00",
+                "result": "completed",
+                "target": "benlab",
+            }],
+            "warnings": [],
+            "boundaries": [],
+        })
+        self.assertIn("## Operator", dashboard)
+        self.assertIn("`lab-console run daily`", dashboard)
+        self.assertIn("## Recent activity", dashboard)
+        self.assertIn("[BenLab details](file:///tmp/benlab-actions.json)", dashboard)
+        self.assertIn("`lab-console run benlab-refresh`", dashboard)
+        self.assertIn("Weekly Connect", dashboard)
+
     def test_dashboard_cells_escape_html_and_markdown_tables(self):
         self.assertEqual(lab_console.cell("<script>|private</script>"), "&lt;script&gt;\\|private&lt;/script&gt;")
+        self.assertEqual(
+            lab_console.cell("![x](https://host/track) [link](https://host)"),
+            "\\!\\[x\\]\\(https://host/track\\) \\[link\\]\\(https://host\\)",
+        )
+        self.assertEqual(lab_console.cell("safe\r# injected"), "safe # injected")
+
+    def test_routine_input_is_not_environment_expanded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text("#!/bin/sh\nprintf '%s' \"$1\"\n", encoding="utf-8")
+            adapter.chmod(0o755)
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "sample", "label": "Sample", "description": "Test", "target": "test",
+                "adapter": str(adapter), "cwd": ".", "command": ["{input}"], "read_only": True,
+                "requires_confirmation": False, "expected_output": "text", "duration": "brief",
+                "interaction": "none",
+            }]}), encoding="utf-8")
+
+            receipt = lab_console.run_routine(
+                "sample", registry_path, root / "receipts",
+                input_value="$HOME/material", refresh_world_state=False,
+            )
+
+            self.assertEqual(Path(receipt["artifact"]).read_text(), "$HOME/material")
+
+    def test_failed_process_start_is_recorded_truthfully(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "sample", "label": "Sample", "description": "Test", "target": "test",
+                "adapter": str(root / "missing"), "cwd": ".", "command": ["ignored"],
+                "read_only": True, "requires_confirmation": False, "expected_output": "text",
+                "duration": "brief", "interaction": "none",
+            }]}), encoding="utf-8")
+
+            seen = []
+
+            def observe_dashboard_refresh(_config_path):
+                stored = json.loads(next((root / "receipts").glob("*.json")).read_text())
+                seen.append(stored["result"])
+
+            with mock.patch.object(
+                lab_console, "write_snapshot", side_effect=observe_dashboard_refresh
+            ):
+                receipt = lab_console.run_routine("sample", registry_path, root / "receipts")
+
+            self.assertFalse(receipt["started"])
+            self.assertEqual(receipt["result"], "failed")
+            self.assertEqual(seen, ["failed"])
+
+    def test_artifact_failure_preserves_truthful_execution_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            adapter.chmod(0o755)
+            (root / "routine-artifacts").write_text("blocks directory creation", encoding="utf-8")
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "sample", "label": "Sample", "description": "Test", "target": "test",
+                "adapter": str(adapter), "cwd": ".", "command": ["ignored"], "read_only": True,
+                "requires_confirmation": False, "expected_output": "text", "duration": "brief",
+                "interaction": "none",
+            }]}), encoding="utf-8")
+
+            receipt = lab_console.run_routine(
+                "sample", registry_path, root / "receipts", refresh_world_state=False
+            )
+
+            self.assertTrue(receipt["started"])
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual(receipt["result"], "failed")
+
+    def test_refresh_failure_is_part_of_receipt_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            adapter.chmod(0o755)
+            registry_path = root / "routines.json"
+            registry_path.write_text(json.dumps({"routines": [{
+                "id": "sample", "label": "Sample", "description": "Test", "target": "test",
+                "adapter": str(adapter), "cwd": ".", "command": ["ignored"], "read_only": True,
+                "requires_confirmation": False, "expected_output": "text", "duration": "brief",
+                "interaction": "none",
+            }]}), encoding="utf-8")
+            refresh_seen = []
+
+            def observe_dashboard_refresh(_config_path):
+                stored = json.loads(next((root / "receipts").glob("*.json")).read_text())
+                refresh_seen.append(stored["result"])
+
+            with (
+                mock.patch.object(
+                    lab_console.subprocess, "run",
+                    side_effect=[mock.Mock(returncode=0, stdout=""), mock.Mock(returncode=2)],
+                ),
+                mock.patch.object(lab_console, "write_snapshot", side_effect=observe_dashboard_refresh),
+            ):
+                receipt = lab_console.run_routine("sample", registry_path, root / "receipts")
+
+            self.assertEqual(receipt["result"], "refresh-failed")
+            self.assertEqual(receipt["refresh_exit_code"], 2)
+            self.assertFalse(receipt["refreshed_world_state"])
+            self.assertEqual(refresh_seen, ["refresh-failed"])
 
     def test_analyst_summary_omits_private_source_material(self):
         payload = {
