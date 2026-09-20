@@ -3,18 +3,39 @@
   "$id": "world-state.schema.json",
   "title": "Homeauto interpreted world state",
   "type": "object",
-  "required": ["contract", "generated_at", "observations", "machines", "capabilities", "situations", "transitions", "boundaries"],
+  "required": ["contract", "generated_at", "opportunity_contract", "inputs", "observations", "machines", "capabilities", "opportunities", "situations", "transitions", "boundaries"],
   "properties": {
     "contract": {
       "type": "object",
       "required": ["name", "schema_version", "authority"],
       "properties": {
         "name": {"const": "homeauto-world-state"},
-        "schema_version": {"const": "1.0.0"},
+        "schema_version": {"const": "1.1.0"},
         "authority": {"const": "read-only; no control actions"}
       }
     },
     "generated_at": {"type": "string", "format": "date-time"},
+    "opportunity_contract": {
+      "type": "object",
+      "required": ["name", "schema_version", "authority", "prose_inference_allowed"],
+      "properties": {
+        "name": {"const": "lab-opportunities"},
+        "schema_version": {"const": "1.0.0"},
+        "authority": {"const": "derived_operator_state"},
+        "prose_inference_allowed": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["benlab", "schedule", "world_state"],
+      "properties": {
+        "benlab": {"type": "object"},
+        "schedule": {"type": "object"},
+        "world_state": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
     "observations": {
       "type": "array",
       "items": {
@@ -90,6 +111,50 @@
         "additionalProperties": false
       }
     },
+    "opportunities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["opportunity_id", "action_id", "project_id", "state", "action", "capacity", "affordances", "why", "provenance", "warnings"],
+        "properties": {
+          "opportunity_id": {"type": "string"},
+          "action_id": {"type": "string"},
+          "project_id": {"type": ["string", "null"]},
+          "state": {"enum": ["available", "capacity_stale", "runtime_stale", "missing_affordance", "blocked", "insufficient_information", "not_currently_eligible"]},
+          "action": {"type": "object"},
+          "capacity": {"type": ["object", "null"]},
+          "affordances": {
+            "type": "object",
+            "required": ["required", "available", "missing", "providers"],
+            "properties": {
+              "required": {"type": "array", "items": {"type": "string"}},
+              "available": {"type": "array", "items": {"type": "string"}},
+              "missing": {"type": "array", "items": {"type": "string"}},
+              "providers": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          },
+          "why": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["check", "result", "detail", "source_ids"],
+              "properties": {
+                "check": {"type": "string"},
+                "result": {"enum": ["pass", "fail", "unknown"]},
+                "detail": {"type": "string"},
+                "source_ids": {"type": "array", "items": {"type": "string"}}
+              },
+              "additionalProperties": false
+            }
+          },
+          "provenance": {"type": "array", "items": {"type": "object"}},
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
     "situations": {
       "type": "array",
       "items": {
@@ -106,12 +171,15 @@
       "maxItems": 100,
       "items": {
         "type": "object",
-        "required": ["situation_id", "from", "to", "changed_at"],
+        "required": ["situation_id", "action_id", "from", "to", "changed_at", "cause", "source_ids"],
         "properties": {
           "situation_id": {"type": "string"},
+          "action_id": {"type": ["string", "null"]},
           "from": {"type": ["string", "null"]},
           "to": {"type": ["string", "null"]},
-          "changed_at": {"type": "string"}
+          "changed_at": {"type": "string"},
+          "cause": {"type": "string"},
+          "source_ids": {"type": "array", "items": {"type": "string"}}
         },
         "additionalProperties": false
       }

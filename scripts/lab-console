@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import html
 import json
 import os
@@ -52,6 +53,21 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def valid_datetime(value: Any) -> bool:
+    try:
+        return isinstance(value, str) and datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is not None
+    except ValueError:
+        return False
+
+
 def resolve_path(value: str) -> Path:
     path = Path(value).expanduser()
     return path if path.is_absolute() else (ROOT / path).resolve()
@@ -75,12 +91,78 @@ def source_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
 def summarize_benlab(path: Path) -> dict[str, Any]:
     payload = read_json(path)
     contract = payload.get("contract", {})
-    if contract.get("name") != "benlab-actions":
-        raise ValueError("BenLab export is not a benlab-actions contract")
+    if (
+        contract.get("name") != "benlab-actions"
+        or contract.get("schema_version") not in {"1.0.0", "1.1.0"}
+        or contract.get("authority") != "human-authored project attention metadata"
+        or contract.get("prose_inference_allowed") is not False
+        or not valid_datetime(payload.get("generated_at"))
+    ):
+        raise ValueError(f"unsupported BenLab action contract: {contract!r}")
+
+    queue_locations = {
+        project: (queue_name, position)
+        for queue_name in ("now", "next", "background")
+        for position, project in enumerate(payload.get("queues", {}).get(queue_name, []), 1)
+    }
+
+    def normalize_action(action: dict[str, Any]) -> dict[str, Any]:
+        queue_name, queue_position = queue_locations.get(
+            action.get("project"), (action.get("attention_state"), None)
+        )
+        provenance = {
+            field: action.get(f"{field}_source")
+            for field in (
+                "next_action", "next_action_effort", "next_action_stack", "next_action_route",
+                "evidence_status", "evidence_blocker", "evidence_note", "fastest_capture",
+                "missing_proof", "portfolio_blocker", "portfolio_ready", "proof_mode",
+                "public_claim", "public_safe", "risk",
+            )
+            if f"{field}_source" in action
+        }
+        return {
+            "action_id": action.get("action_id"),
+            "project_id": action.get("path"),
+            "project": action.get("project"),
+            "attention_state": action.get("attention_state"),
+            "queue": queue_name,
+            "queue_position": queue_position,
+            "current_commitment": action.get("current_commitment"),
+            "may_request_time_now": action.get("may_request_time_now"),
+            "next_action": action.get("next_action"),
+            "effort": action.get("next_action_effort"),
+            "energy_fit": action.get("energy_fit"),
+            "required_stack": action.get("next_action_stack") or [],
+            "route": action.get("next_action_route"),
+            "evidence": {
+                "status": action.get("evidence_status"),
+                "blocker": action.get("evidence_blocker"),
+                "note": action.get("evidence_note"),
+                "provenance": provenance,
+            },
+            "blocker_state": {
+                "evidence": action.get("evidence_blocker"),
+                "portfolio": action.get("portfolio_blocker"),
+                "risk": action.get("risk"),
+            },
+            "proof_mode": action.get("proof_mode"),
+            "readiness": action.get("ready_for") or [],
+            "public_safety": {"safe": action.get("public_safe"), "claim": action.get("public_claim")},
+            "human_activation_reason": action.get("attention_reason") or action.get("why_active"),
+            "sleeping": action.get("attention_state") == "sleeping",
+            "status": action.get("status"),
+        }
+
+    actions = [normalize_action(action) for action in payload.get("actions", []) if isinstance(action, dict)]
+    queue_rank = {"now": 0, "next": 1, "background": 2, "sleeping": 3}
+    actions.sort(key=lambda item: (
+        queue_rank.get(item.get("queue"), 4),
+        item.get("queue_position") if item.get("queue_position") is not None else 1_000_000,
+    ))
 
     actions_by_project = {
         action.get("project"): action
-        for action in payload.get("actions", [])
+        for action in actions
         if action.get("project")
     }
 
@@ -91,12 +173,15 @@ def summarize_benlab(path: Path) -> dict[str, Any]:
             rows.append(
                 {
                     "project": project,
+                    "action_id": action.get("action_id"),
+                    "project_id": action.get("project_id"),
+                    "queue_position": action.get("queue_position"),
                     "attention": action.get("attention_state", name),
                     "next_action": action.get("next_action"),
-                    "effort": action.get("next_action_effort"),
+                    "effort": action.get("effort"),
                     "energy_fit": action.get("energy_fit"),
-                    "stack": action.get("next_action_stack") or [],
-                    "route": action.get("next_action_route"),
+                    "stack": action.get("required_stack") or [],
+                    "route": action.get("route"),
                 }
             )
         return rows
@@ -104,7 +189,9 @@ def summarize_benlab(path: Path) -> dict[str, Any]:
     return {
         "generated_at": payload.get("generated_at"),
         "contract": contract,
+        "artifact_sha256": sha256_file(path),
         "attention_budget": payload.get("attention_budget", {}),
+        "actions": actions,
         "now": queue("now"),
         "next": queue("next"),
         "sleeping_count": len(payload.get("sleeping", [])),
@@ -159,8 +246,18 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
             or contract.get("authority") != "read_only_capacity_evidence"
             or contract.get("scheduling_authority") is not False
             or contract.get("calendar_mutation_allowed") is not False
+            or contract.get("prose_inference_allowed") is not False
+            or not valid_datetime(contract.get("generated_at"))
         ):
             raise ValueError(f"unsupported schedule capacity contract: {contract!r}")
+        inputs = payload.get("inputs", {})
+        source_hash = inputs.get("benlab_artifact_sha256")
+        if (
+            inputs.get("benlab_contract_name") != "benlab-actions"
+            or inputs.get("benlab_schema_version") not in {"1.0.0", "1.1.0"}
+            or (source_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", str(source_hash)))
+        ):
+            raise ValueError(f"invalid schedule capacity input: {inputs!r}")
         freshness = payload.get("freshness", {})
         if freshness.get("status") != "fresh" and any(item.get("fit_status") == "fits" for item in payload.get("results", [])):
             raise ValueError("schedule capacity contract contains fits without fresh capacity evidence")
@@ -183,10 +280,13 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
             })
         return {
             "contract": contract,
+            "artifact_sha256": sha256_file(path),
+            "inputs": inputs,
             "freshness": freshness,
             "result_count": len(payload.get("results", [])),
             "fit_count": len(fits),
             "fits": fits,
+            "results": [dict(item) for item in payload.get("results", []) if isinstance(item, dict)],
         }
 
     with path.open(encoding="utf-8", newline="") as handle:
@@ -359,6 +459,8 @@ def run_routine(
     input_value: str | None = None,
     arguments: list[str] | None = None,
     environment: dict[str, str] | None = None,
+    action_id: str | None = None,
+    opportunity_id: str | None = None,
     confirmed: bool = False,
     refresh_world_state: bool = True,
 ) -> dict[str, Any]:
@@ -398,12 +500,19 @@ def run_routine(
         "requested_at": now.isoformat(),
         "requested_by": "human",
         "target": routine["target"],
+        "action_id": action_id,
+        "opportunity_id": opportunity_id,
+        "supplied_inputs": {"input": input_value, "arguments": arguments or []},
+        "source_authority": routine["target"],
         "started": False,
         "result": "running",
         "artifact": None,
         "exit_code": None,
         "refreshed_world_state": False,
         "refresh_exit_code": None,
+        "canonical_source_changed": False if routine["read_only"] else None,
+        "semantic_completion": False,
+        "return_destination": routine["target"],
     }
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
@@ -491,7 +600,22 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     routine_receipts, receipt_errors = load_routine_receipts()
     warnings.extend(directive_errors)
     warnings.extend(receipt_errors)
+    benlab = load_summary("benlab_actions", summarize_benlab)
     capacity = load_summary("schedule_capacity", summarize_capacity)
+    if benlab and capacity:
+        capacity_input = capacity.get("inputs", {})
+        mismatch = (
+            capacity_input.get("benlab_contract_name") != benlab.get("contract", {}).get("name")
+            or capacity_input.get("benlab_schema_version") != benlab.get("contract", {}).get("schema_version")
+            or capacity_input.get("benlab_artifact_sha256") != benlab.get("artifact_sha256")
+            or (
+                capacity_input.get("benlab_generated_at") is not None
+                and capacity_input.get("benlab_generated_at") != benlab.get("generated_at")
+            )
+        )
+        if mismatch:
+            warnings.append("schedule-capacity source binding does not match loaded BenLab artifact")
+            capacity = None
     snapshot = {
         "contract": {
             "name": "benlab-operator-snapshot",
@@ -500,7 +624,7 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         },
         "generated_at": utc_now(),
         "sources": statuses,
-        "benlab": load_summary("benlab_actions", summarize_benlab),
+        "benlab": benlab,
         "analyst": load_summary("analyst_promotions", summarize_analyst),
         "schedule": {
             "capacity": capacity,
@@ -530,6 +654,33 @@ def cell(value: Any) -> str:
 
 
 def render_dashboard(snapshot: dict[str, Any]) -> str:
+    world_state = snapshot.get("world_state") or {}
+    opportunities = world_state.get("opportunities", [])
+
+    def opportunity_lines(rows: list[dict[str, Any]], empty: str) -> list[str]:
+        rendered = []
+        for item in rows:
+            action = item.get("action", {})
+            capacity = item.get("capacity") or {}
+            rendered.extend([
+                f"### {cell(action.get('project'))}",
+                "",
+                f"**{cell(item.get('state', '').upper())}** · {cell(action.get('effort'))} · {cell(action.get('energy_fit'))}",
+                "",
+                f"Action: {cell(action.get('next_action'))}",
+                f"Capacity: {cell(capacity.get('capacity_start'))} – {cell(capacity.get('capacity_end'))}",
+                f"Affordances: required {cell(item.get('affordances', {}).get('required', []))}; missing {cell(item.get('affordances', {}).get('missing', []))}",
+                "",
+                "Why?",
+            ])
+            rendered.extend(f"- {cell(reason.get('detail'))}" for reason in item.get("why", []))
+            rendered.extend(["", "_No action has been scheduled or dispatched._", ""])
+        return rendered or [empty, ""]
+
+    available = [item for item in opportunities if item.get("state") == "available"]
+    blocked = [item for item in opportunities if item.get("state") in {"blocked", "missing_affordance"}]
+    uncertain = [item for item in opportunities if item.get("state") in {"capacity_stale", "runtime_stale", "insufficient_information", "not_currently_eligible"}]
+    recent = [item for item in world_state.get("transitions", []) if str(item.get("situation_id", "")).startswith("opportunity:")][-10:]
     lines = [
         "# BenLab operator dashboard",
         "",
@@ -538,7 +689,21 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         "> Read-only orientation surface. Analyst candidates are not commitments; capacity",
         "> fits are not calendar events; directives are inert until explicitly reviewed.",
         "",
-        "## Operator",
+        "## Available now",
+        "",
+        *opportunity_lines(available, "No opportunities are currently available."),
+        "## Recently changed",
+        "",
+        *(f"- `{cell(item.get('situation_id'))}`: {cell(item.get('from'))} → {cell(item.get('to'))} — {cell(item.get('cause'))}" for item in recent),
+        *( [] if recent else ["No meaningful opportunity-state changes recorded."] ),
+        "",
+        "## Blocked / missing affordances",
+        "",
+        *opportunity_lines(blocked, "No current opportunities are explicitly blocked or missing affordances."),
+        "## Stale or uncertain evidence",
+        "",
+        *opportunity_lines(uncertain, "No current opportunities have stale or uncertain evidence."),
+        "## Intentional routines",
         "",
         "| Today | This week | This month | Now |",
         "| --- | --- | --- | --- |",
@@ -645,7 +810,7 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
             lines.append("| — | — | — | — | — | No current fit rows |")
 
     analyst = snapshot.get("analyst")
-    lines.extend(["", "## Recent Analyst candidates", ""])
+    lines.extend(["", "## Research", "", "### Recent Analyst candidates", ""])
     if not analyst:
         lines.append("Analyst promotions are unavailable.")
     else:
@@ -881,6 +1046,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run = subparsers.add_parser("run", help="invoke a registered routine")
     run.add_argument("routine")
     run.add_argument("--input", help="explicit input required by parameterized routines")
+    run.add_argument("--action-id", help="optional BenLab action ID to bind into the receipt")
+    run.add_argument("--opportunity-id", help="optional derived opportunity ID to bind into the receipt")
     run.add_argument("--yes", action="store_true", help="confirm a routine that requires confirmation")
     analyst = subparsers.add_parser(
         "analyst",
@@ -938,7 +1105,13 @@ def main(argv: list[str] | None = None) -> int:
         input_value = args.input if args.command == "run" else args.question
         confirmed = args.yes if args.command == "run" else False
         try:
-            receipt = run_routine(routine_id, input_value=input_value, confirmed=confirmed)
+            receipt = run_routine(
+                routine_id,
+                input_value=input_value,
+                confirmed=confirmed,
+                action_id=args.action_id if args.command == "run" else None,
+                opportunity_id=args.opportunity_id if args.command == "run" else None,
+            )
         except (ValueError, PermissionError) as exc:
             print(exc, file=sys.stderr)
             return 2

@@ -44,6 +44,9 @@ services:
       EMBED_MODEL: "${ASSISTANT_EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}"
       LLM_URL: "http://llama-server:8080/v1/chat/completions"
       COLLECTION_TAG: "${ASSISTANT_COLLECTION_TAG:-homeauto}"
+      WORLD_STATE_PATH: "/data/coordination/world-state.json"
+    volumes:
+      - ../../../coordination/state:/data/coordination:ro
     depends_on:
       - qdrant
       - llama-server
@@ -64,7 +67,7 @@ services:
       - ../../../config:/data/config:ro
       - ../../../scripts:/data/scripts:ro
       - ../../../flows:/data/flows:ro
-      - ../../../coordination:/data/coordination:ro
+
     command: ["python", "/app/ingest.py"]
     depends_on:
       - qdrant

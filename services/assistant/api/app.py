@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -7,6 +8,8 @@ from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, MatchValue, FieldCondition
 from sentence_transformers import SentenceTransformer
+
+from context import filter_retrieval_chunks, load_current_state
 
 
 class QueryRequest(BaseModel):
@@ -27,6 +30,7 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "homeauto-assistant")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 LLM_URL = os.getenv("LLM_URL", "http://llama-server:8080/v1/chat/completions")
 ASSISTANT_NAME = os.getenv("ASSISTANT_NAME", "orin-assistant")
+WORLD_STATE_PATH = Path(os.getenv("WORLD_STATE_PATH", "/data/coordination/world-state.json"))
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
     "You are a local, on-device assistant. Be concise, cite sources by filename, and do not guess.",
@@ -77,7 +81,10 @@ def query(request: QueryRequest) -> QueryResponse:
         with_payload=True,
     )
 
-    chunks = [result.model_dump() for result in results]
+    chunks = filter_retrieval_chunks([result.model_dump() for result in results])
+    current_state = load_current_state(WORLD_STATE_PATH)
+    if current_state:
+        chunks.insert(0, current_state)
     prompt = _build_prompt(request.question, chunks)
 
     payload = {

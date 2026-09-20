@@ -26,6 +26,7 @@ DEFAULT_STUDIO_REGISTRY = ROOT / "coordination" / "studio-machines.json"
 BOUNDARY = "World state is read-only and does not create, approve, or dispatch directives."
 ACTIVE = {"active", "detected", "home", "occupied", "on", "open", "printing", "paused"}
 RUNNING = {"healthy", "running", "up"}
+BENLAB_FRESHNESS_SECONDS = 7 * 24 * 60 * 60
 
 
 def parse_time(value: str | None) -> datetime | None:
@@ -53,7 +54,7 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
     sources = payload.get("sources", {})
     needs = payload.get("benlab", {}).get("now", [])
     fits = payload.get("schedule", {}).get("capacity", {}).get("fits", [])
-    return {
+    summary = {
         "generated_at": payload.get("generated_at"),
         "source_availability": {
             name: bool(details.get("available"))
@@ -68,6 +69,19 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "capacity_projects": [item.get("project") for item in fits if item.get("temporal_status") == "today"],
     }
+    benlab = payload.get("benlab")
+    capacity = payload.get("schedule", {}).get("capacity")
+    if isinstance(benlab, dict):
+        summary["benlab"] = {
+            key: benlab.get(key)
+            for key in ("generated_at", "artifact_sha256", "contract", "actions")
+        }
+    if isinstance(capacity, dict):
+        summary["capacity"] = {
+            key: capacity.get(key)
+            for key in ("artifact_sha256", "contract", "inputs", "freshness", "results")
+        }
+    return summary
 
 
 def load_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
@@ -183,6 +197,189 @@ def _situation(identifier: str, label: str, state: str, rule: str, evidence: lis
         "evidence": [item["id"] for item in evidence],
         "why": [f"{item['id']} = {_state(item) or 'observed'}" for item in evidence],
     }
+
+
+def _why(check: str, result: str, detail: str, source_ids: list[str]) -> dict[str, Any]:
+    return {"check": check, "result": result, "detail": detail, "source_ids": source_ids}
+
+
+def derive_opportunities(
+    observations: list[dict[str, Any]],
+    machines: list[dict[str, Any]],
+    collected_at: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    coordination = next((item for item in observations if item["source"].get("semantic") == "benlab_context"), None)
+    context = coordination.get("value", {}) if coordination else {}
+    benlab = context.get("benlab", {}) if isinstance(context, dict) else {}
+    capacity_document = context.get("capacity", {}) if isinstance(context, dict) else {}
+    inputs = {
+        "benlab": {
+            "contract": benlab.get("contract"),
+            "artifact_sha256": benlab.get("artifact_sha256"),
+            "generated_at": benlab.get("generated_at"),
+        },
+        "schedule": {
+            "contract": capacity_document.get("contract"),
+            "artifact_sha256": capacity_document.get("artifact_sha256"),
+            "generated_at": (capacity_document.get("contract") or {}).get("generated_at"),
+        },
+        "world_state": {"generated_at": collected_at},
+    }
+    contract = {
+        "name": "lab-opportunities",
+        "schema_version": "1.0.0",
+        "authority": "derived_operator_state",
+        "prose_inference_allowed": False,
+    }
+    if not coordination:
+        return {"contract": contract, "inputs": inputs}, []
+
+    capacity_results = capacity_document.get("results") or []
+    actions = [
+        item for item in (benlab.get("actions") or [])
+        if item.get("attention_state") in {"now", "next"}
+        or item.get("queue") in {"now", "next"}
+        or item.get("current_commitment")
+    ]
+
+    def capacity_for(action: dict[str, Any]) -> dict[str, Any] | None:
+        action_id = action.get("action_id")
+        if action_id:
+            match = next((item for item in capacity_results if item.get("action_id") == action_id), None)
+            if match:
+                return match
+        return next((
+            item for item in capacity_results
+            if (action.get("project_id") and item.get("project_id") == action.get("project_id"))
+            or (
+                item.get("project") == action.get("project")
+                and item.get("next_action") == action.get("next_action")
+            )
+        ), None)
+
+    providers = []
+    for observation in observations:
+        affordances = list(observation["source"].get("affordances") or [])
+        scope = observation["source"].get("affordance_scope")
+        if affordances and scope and observation.get("value"):
+            providers.append({
+                "id": observation["id"], "scope": scope, "affordances": affordances,
+                "freshness": observation["freshness"]["status"], "state": _state(observation),
+            })
+    for machine in machines:
+        if machine.get("capabilities") and machine.get("scope"):
+            providers.append({
+                "id": machine["id"], "scope": machine["scope"],
+                "affordances": list(machine["capabilities"]),
+                "freshness": machine.get("freshness", "unknown"),
+                "state": machine.get("readiness", "unknown"),
+            })
+
+    semantic_freshness = freshness(benlab.get("generated_at"), collected_at, BENLAB_FRESHNESS_SECONDS)
+    capacity_freshness = (capacity_document.get("freshness") or {}).get("status", "unknown")
+    opportunities = []
+    for source_action in actions:
+        capacity = capacity_for(source_action)
+        action_id = source_action.get("action_id") or (capacity or {}).get("action_id")
+        if not action_id:
+            continue
+        action = {**source_action, "authority": "BenLab", "action_id": action_id}
+        if capacity:
+            capacity = {**capacity, "authority": "schedule-assessment"}
+        required = list(action.get("required_stack") or [])
+        available: set[str] = set()
+        stale: set[str] = set()
+        provider_ids: list[str] = []
+        stale_candidate: tuple[set[str], set[str], list[str]] | None = None
+        for scope in sorted({item["scope"] for item in providers}):
+            scoped = [item for item in providers if item["scope"] == scope]
+            fresh_available = set().union(*(
+                set(item["affordances"]) for item in scoped
+                if item["freshness"] == "fresh" and item["state"] not in {"offline", "unavailable", "disconnected", "fault", "error", "failed", "busy", "needs_attention"}
+            ), set())
+            stale_available = set().union(*(
+                set(item["affordances"]) for item in scoped if item["freshness"] != "fresh"
+            ), set())
+            if set(required).issubset(fresh_available):
+                available = set(required)
+                provider_ids = [item["id"] for item in scoped if set(item["affordances"]) & set(required)]
+                break
+            if stale_candidate is None and set(required).issubset(fresh_available | stale_available):
+                stale_candidate = (
+                    fresh_available & set(required),
+                    stale_available & set(required),
+                    [item["id"] for item in scoped if set(item["affordances"]) & set(required)],
+                )
+        if not set(required).issubset(available) and stale_candidate:
+            available, stale, provider_ids = stale_candidate
+
+        eligible = (
+            action.get("attention_state") == "now"
+            and action.get("current_commitment") is True
+            and action.get("may_request_time_now") is True
+            and action.get("sleeping") is not True
+        )
+        why = [
+            _why("benlab_eligibility", "pass" if eligible else "fail", "BenLab permits this current adopted action to request time." if eligible else "BenLab does not currently permit this action to request time.", [coordination["id"]]),
+        ]
+        if not eligible:
+            state = "not_currently_eligible"
+        elif semantic_freshness["status"] != "fresh":
+            state = "insufficient_information"
+            why.append(_why("semantic_freshness", "unknown", "BenLab semantic state is stale or undated.", [coordination["id"]]))
+        elif not capacity:
+            state = "insufficient_information"
+            why.append(_why("capacity_fit", "unknown", "No schedule-capacity result exists for this action.", [coordination["id"]]))
+        elif capacity_freshness != "fresh":
+            state = "capacity_stale"
+            why.append(_why("capacity_freshness", "fail", "Schedule capacity evidence is not fresh.", [coordination["id"]]))
+        elif capacity.get("fit_status") == "blocked":
+            state = "blocked"
+            why.append(_why("capacity_fit", "fail", capacity.get("reason") or "Schedule capacity reports an explicit blocker.", [coordination["id"]]))
+        elif capacity.get("fit_status") != "fits":
+            state = "insufficient_information"
+            why.append(_why("capacity_fit", "unknown", capacity.get("reason") or "Schedule capacity does not report a compatible fit.", [coordination["id"]]))
+        elif not required:
+            state = "insufficient_information"
+            why.append(_why("runtime_affordances", "unknown", "BenLab supplied no required affordance stack.", [coordination["id"]]))
+        elif set(required).issubset(available):
+            state = "available"
+            why.extend([
+                _why("capacity_fit", "pass", "Schedule-assessment reports compatible capacity without scheduling it.", [coordination["id"]]),
+                _why("runtime_affordances", "pass", "Fresh runtime providers satisfy the required affordances.", provider_ids),
+            ])
+        elif set(required).issubset(available | stale):
+            state = "runtime_stale"
+            why.append(_why("runtime_affordances", "fail", "Potential providers exist, but their evidence is stale.", provider_ids))
+        else:
+            state = "missing_affordance"
+            why.append(_why("runtime_affordances", "fail", "No fresh provider satisfies every required affordance.", provider_ids))
+
+        warnings = list(action.get("warnings") or []) + list((capacity or {}).get("warnings") or [])
+        if source_action.get("action_id") is None:
+            warnings.append("action_id originated in schedule-assessment because BenLab did not supply one")
+        opportunities.append({
+            "opportunity_id": f"opportunity:{action_id}",
+            "action_id": action_id,
+            "project_id": action.get("project_id") or (capacity or {}).get("project_id"),
+            "state": state,
+            "action": action,
+            "capacity": capacity,
+            "affordances": {
+                "required": required,
+                "available": sorted(available),
+                "missing": sorted(set(required) - available),
+                "providers": provider_ids,
+            },
+            "why": why,
+            "provenance": [
+                {"authority": "BenLab", "artifact_sha256": benlab.get("artifact_sha256"), "contract": benlab.get("contract")},
+                {"authority": "schedule-assessment", "artifact_sha256": capacity_document.get("artifact_sha256"), "contract": capacity_document.get("contract")},
+                {"authority": "homeauto", "source_ids": provider_ids},
+            ],
+            "warnings": warnings,
+        })
+    return {"contract": contract, "inputs": inputs}, opportunities
 
 
 def derive(observations: list[dict[str, Any]], machines: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
@@ -354,28 +551,76 @@ def interpret(
     observations = normalize(raw, registry)
     machines = derive_machines(observations, studio_registry or load_studio_registry())
     capabilities = derive_capabilities(machines)
+    opportunity_contract, opportunities = derive_opportunities(observations, machines, raw["collected_at"])
     situations = derive(observations, machines)
-    transitions = list((previous_state or {}).get("transitions", []))
+    if opportunities:
+        situations = [
+            item for item in situations
+            if not item["id"].startswith(("action-opportunity", "evidence-opportunity"))
+        ]
+        available_count = sum(item["state"] == "available" for item in opportunities)
+        situations.append({
+            "id": "action-opportunities",
+            "label": "Action opportunities",
+            "state": "available" if available_count else "none",
+            "confidence": 1.0,
+            "rule": "summarizes deterministic opportunity states without authorizing action",
+            "evidence": [item["action_id"] for item in opportunities],
+            "why": [f"{available_count} available of {len(opportunities)} current BenLab actions"],
+        })
+        situations.extend({
+            "id": item["opportunity_id"],
+            "label": f"Action opportunity: {item['action'].get('project')}",
+            "state": item["state"],
+            "confidence": 1.0,
+            "rule": "derived from explicit BenLab eligibility, schedule capacity, freshness, blockers, and runtime affordances",
+            "evidence": sorted({source for reason in item["why"] for source in reason["source_ids"]}),
+            "why": [reason["detail"] for reason in item["why"]],
+        } for item in opportunities)
+    transitions = [
+        {
+            **item,
+            "action_id": item.get("action_id"),
+            "cause": item.get("cause", "legacy observed state change"),
+            "source_ids": item.get("source_ids", []),
+        }
+        for item in (previous_state or {}).get("transitions", [])
+    ]
     if previous_state:
         before = {item["id"]: item["state"] for item in previous_state.get("situations", [])}
         before.update({item["id"]: item["readiness"] for item in previous_state.get("machines", [])})
+        before.update({item["opportunity_id"]: item["state"] for item in previous_state.get("opportunities", [])})
         after = {item["id"]: item["state"] for item in situations}
         after.update({item["id"]: item["readiness"] for item in machines})
-        transitions.extend(
-            {"situation_id": identifier, "from": before.get(identifier), "to": after.get(identifier), "changed_at": raw["collected_at"]}
-            for identifier in sorted(before.keys() | after.keys())
-            if before.get(identifier) != after.get(identifier)
-        )
+        after.update({item["opportunity_id"]: item["state"] for item in opportunities})
+        opportunity_details = {item["opportunity_id"]: item for item in opportunities}
+        for identifier in sorted(before.keys() | after.keys()):
+            if before.get(identifier) == after.get(identifier):
+                continue
+            opportunity = opportunity_details.get(identifier)
+            reasons = (opportunity or {}).get("why", [])
+            transitions.append({
+                "situation_id": identifier,
+                "action_id": (opportunity or {}).get("action_id"),
+                "from": before.get(identifier),
+                "to": after.get(identifier),
+                "changed_at": raw["collected_at"],
+                "cause": next((reason["detail"] for reason in reasons if reason["result"] != "pass"), "observed derived state changed"),
+                "source_ids": sorted({source for reason in reasons for source in reason["source_ids"]}),
+            })
     return {
         "contract": {
             "name": "homeauto-world-state",
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "authority": "read-only; no control actions",
         },
         "generated_at": raw["collected_at"],
+        "opportunity_contract": opportunity_contract["contract"],
+        "inputs": opportunity_contract["inputs"],
         "observations": observations,
         "machines": machines,
         "capabilities": capabilities,
+        "opportunities": opportunities,
         "situations": situations,
         "transitions": transitions[-100:],
         "boundaries": [BOUNDARY, "The local LLM consumes structured state downstream and is not a state source."],

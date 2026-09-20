@@ -17,6 +17,45 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    def test_benlab_contract_is_versioned_and_preserves_action_semantics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "benlab-actions.json"
+            payload = {
+                "contract": {
+                    "name": "benlab-actions", "schema_version": "1.1.0",
+                    "authority": "human-authored project attention metadata",
+                    "prose_inference_allowed": False,
+                },
+                "generated_at": "2026-09-20T00:00:00+00:00",
+                "actions": [{
+                    "action_id": "benlab:one", "path": "vault/one.md", "project": "one",
+                    "attention_state": "now", "attention_reason": "human activation",
+                    "current_commitment": True, "may_request_time_now": True,
+                    "next_action": "Do one thing", "next_action_effort": "30m",
+                    "energy_fit": "screen-only", "next_action_stack": ["terminal", "repo"],
+                    "next_action_route": "repo_issue", "evidence_status": "missing",
+                    "evidence_blocker": True, "proof_mode": "source-repo proof",
+                    "public_safe": True, "ready_for": ["review"], "status": "active",
+                }],
+                "queues": {"now": ["one"], "next": [], "background": []},
+                "sleeping": [],
+            }
+            path.write_text(json.dumps(payload))
+
+            summary = lab_console.summarize_benlab(path)
+
+            action = summary["actions"][0]
+            self.assertEqual(action["action_id"], "benlab:one")
+            self.assertEqual(action["queue_position"], 1)
+            self.assertEqual(action["evidence"]["status"], "missing")
+            self.assertEqual(action["human_activation_reason"], "human activation")
+            self.assertEqual(summary["artifact_sha256"], lab_console.sha256_file(path))
+
+            payload["contract"]["schema_version"] = "9.0.0"
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "unsupported BenLab action contract"):
+                lab_console.summarize_benlab(path)
+
     def test_schedule_capacity_json_is_consumed_without_scheduling_authority(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "schedule_capacity.json"
@@ -24,8 +63,10 @@ class LabConsoleTests(unittest.TestCase):
                 "contract": {
                     "name": "schedule-capacity", "schema_version": "1.0.0",
                     "authority": "read_only_capacity_evidence", "scheduling_authority": False,
-                    "calendar_mutation_allowed": False,
+                    "calendar_mutation_allowed": False, "prose_inference_allowed": False,
+                    "generated_at": "2026-09-20T00:00:00+00:00",
                 },
+                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "a" * 64},
                 "freshness": {"status": "fresh", "warnings": []},
                 "results": [
                     {"action_id": "benlab:one", "project_id": "p/one.md", "project": "one", "queue": "now", "queue_position": 1, "action": "A", "effort": "30m", "energy_fit": "screen-only", "fit_status": "fits", "capacity_start": "2026-09-19T10:00:00-05:00", "capacity_end": "2026-09-19T11:00:00-05:00", "source_freshness": "fresh"},
@@ -41,10 +82,60 @@ class LabConsoleTests(unittest.TestCase):
             self.assertEqual(summary["fits"][0]["action_id"], "benlab:one")
             self.assertEqual(summary["fits"][0]["queue_position"], 1)
             self.assertFalse(summary["contract"]["scheduling_authority"])
+            self.assertEqual(summary["results"][1]["fit_status"], "capacity_unknown")
+            self.assertEqual(summary["inputs"]["benlab_artifact_sha256"], "a" * 64)
+            self.assertEqual(summary["contract"]["generated_at"], "2026-09-20T00:00:00+00:00")
+            self.assertEqual(summary["artifact_sha256"], lab_console.sha256_file(path))
+
+    def test_benlab_actions_are_normalized_in_authoritative_queue_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "benlab-actions.json"
+            path.write_text(json.dumps({
+                "contract": {"name": "benlab-actions", "schema_version": "1.1.0", "authority": "human-authored project attention metadata", "prose_inference_allowed": False},
+                "generated_at": "2026-09-20T00:00:00+00:00",
+                "actions": [
+                    {"project": "second", "path": "second.md", "attention_state": "next"},
+                    {"project": "first", "path": "first.md", "attention_state": "now"},
+                ],
+                "queues": {"now": ["first"], "next": ["second"], "background": []},
+                "sleeping": [],
+            }))
+
+            summary = lab_console.summarize_benlab(path)
+
+        self.assertEqual([item["project"] for item in summary["actions"]], ["first", "second"])
+        self.assertEqual([item["queue_position"] for item in summary["actions"]], [1, 1])
+
+    def test_snapshot_rejects_schedule_bound_to_another_benlab_artifact(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            benlab_path = root / "benlab.json"
+            benlab_path.write_text(json.dumps({
+                "contract": {"name": "benlab-actions", "schema_version": "1.1.0", "authority": "human-authored project attention metadata", "prose_inference_allowed": False},
+                "generated_at": "2026-09-20T00:00:00+00:00", "actions": [],
+                "queues": {"now": [], "next": [], "background": []}, "sleeping": [],
+            }))
+            schedule_path = root / "schedule.json"
+            schedule_path.write_text(json.dumps({
+                "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False, "prose_inference_allowed": False, "generated_at": "2026-09-20T00:00:00+00:00"},
+                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "b" * 64},
+                "freshness": {"status": "fresh", "warnings": []}, "results": [],
+            }))
+            config = root / "sources.json"
+            config.write_text(json.dumps({"sources": {
+                "benlab_actions": {"path": str(benlab_path)},
+                "schedule_capacity": {"path": str(schedule_path)},
+            }}))
+
+            snapshot = lab_console.build_snapshot(config)
+
+        self.assertIsNone(snapshot["schedule"]["capacity"])
+        self.assertTrue(any("does not match loaded BenLab artifact" in item for item in snapshot["warnings"]))
 
     def test_schedule_capacity_json_rejects_authority_or_freshness_violation(self):
         base = {
-            "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False},
+            "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False, "prose_inference_allowed": False, "generated_at": "2026-09-20T00:00:00+00:00"},
+            "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "a" * 64},
             "freshness": {"status": "stale"},
             "results": [{"fit_status": "fits"}],
         }
@@ -57,6 +148,11 @@ class LabConsoleTests(unittest.TestCase):
             base["contract"]["calendar_mutation_allowed"] = True
             path.write_text(json.dumps(base))
             with self.assertRaises(ValueError):
+                lab_console.summarize_capacity(path)
+            base["contract"]["calendar_mutation_allowed"] = False
+            base["inputs"]["benlab_artifact_sha256"] = "not-a-sha256"
+            path.write_text(json.dumps(base))
+            with self.assertRaisesRegex(ValueError, "invalid schedule capacity input"):
                 lab_console.summarize_capacity(path)
 
     def test_routine_registry_has_operator_shortcuts(self):
@@ -165,7 +261,7 @@ class LabConsoleTests(unittest.TestCase):
             "warnings": [],
             "boundaries": [],
         })
-        self.assertIn("## Operator", dashboard)
+        self.assertIn("## Intentional routines", dashboard)
         self.assertIn("`lab-console run daily`", dashboard)
         self.assertIn("## Recent activity", dashboard)
         self.assertIn("[BenLab details](file:///tmp/benlab-actions.json)", dashboard)
@@ -458,6 +554,72 @@ class LabConsoleTests(unittest.TestCase):
         self.assertIn("../machine-docs/personal-machines/test-printer/", dashboard)
         self.assertIn("unknown → ready", dashboard)
         self.assertIn("Why?", dashboard)
+
+    def test_dashboard_leads_with_deterministic_opportunities_and_demotes_research(self):
+        dashboard = lab_console.render_dashboard({
+            "generated_at": "2026-09-20T00:00:00+00:00",
+            "sources": {}, "benlab": None,
+            "analyst": {"candidate_count": 1, "recommendation_counts": {}, "recent_candidates": []},
+            "schedule": {"capacity": None, "freshness": None},
+            "directives": [], "routine_receipts": [], "warnings": [], "boundaries": [],
+            "world_state": {
+                "opportunities": [
+                    {
+                        "opportunity_id": "opportunity:a", "action_id": "a", "state": "available",
+                        "action": {"project": "Available project", "next_action": "Make proof", "effort": "30m", "energy_fit": "screen-only"},
+                        "capacity": {"capacity_start": "10:00", "capacity_end": "10:30"},
+                        "affordances": {"required": ["terminal"], "available": ["terminal"], "missing": []},
+                        "why": [{"detail": "BenLab permits the action."}, {"detail": "Fresh terminal evidence exists."}],
+                    },
+                    {
+                        "opportunity_id": "opportunity:b", "action_id": "b", "state": "missing_affordance",
+                        "action": {"project": "Blocked project", "next_action": "Use bench"},
+                        "capacity": None,
+                        "affordances": {"required": ["bench"], "available": [], "missing": ["bench"]},
+                        "why": [{"detail": "No fresh bench provider."}],
+                    },
+                ],
+                "transitions": [{"situation_id": "opportunity:a", "from": "runtime_stale", "to": "available", "changed_at": "2026-09-20T00:00:00+00:00", "cause": "Fresh terminal evidence exists."}],
+                "situations": [], "machines": [], "capabilities": [], "boundaries": [],
+            },
+        })
+
+        headings = [
+            dashboard.index("## Available now"),
+            dashboard.index("## Recently changed"),
+            dashboard.index("## Blocked / missing affordances"),
+            dashboard.index("## Stale or uncertain evidence"),
+            dashboard.index("## Intentional routines"),
+            dashboard.index("## Research"),
+        ]
+        self.assertEqual(headings, sorted(headings))
+        self.assertIn("Available project", dashboard)
+        self.assertIn("Fresh terminal evidence exists", dashboard)
+        self.assertIn("Blocked project", dashboard)
+        self.assertIn("No action has been scheduled or dispatched", dashboard)
+
+    def test_routine_receipt_can_bind_context_without_claiming_semantic_completion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adapter = root / "adapter"
+            adapter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            adapter.chmod(0o755)
+            registry = root / "routines.json"
+            registry.write_text(json.dumps({"routines": [{
+                "id": "sample", "label": "Sample", "description": "Test", "target": "test",
+                "adapter": str(adapter), "cwd": ".", "command": ["ignored"], "read_only": True,
+                "requires_confirmation": False, "expected_output": "text", "duration": "brief", "interaction": "none",
+            }]}))
+
+            receipt = lab_console.run_routine(
+                "sample", registry, root / "receipts", refresh_world_state=False,
+                action_id="benlab:a", opportunity_id="opportunity:benlab:a",
+            )
+
+        self.assertEqual(receipt["action_id"], "benlab:a")
+        self.assertEqual(receipt["opportunity_id"], "opportunity:benlab:a")
+        self.assertFalse(receipt["canonical_source_changed"])
+        self.assertFalse(receipt["semantic_completion"])
 
 
 if __name__ == "__main__":

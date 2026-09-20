@@ -56,6 +56,45 @@ class WorldStateTests(unittest.TestCase):
         raw["errors"] = []
         return raw
 
+    def opportunity_raw(self, *, capacity_status="fresh", fit_status="fits", observed_at=None):
+        raw = json.loads(json.dumps(self.raw))
+        raw["sources"] = [item for item in raw["sources"] if item["source"]["kind"] in {"system", "coordination"}]
+        raw["sources"][0]["observed_at"] = raw["collected_at"]
+        raw["sources"][1]["observed_at"] = observed_at or raw["collected_at"]
+        raw["sources"][1]["payload"] = {
+            "generated_at": raw["collected_at"], "warnings": [], "directives": [],
+            "benlab": {
+                "generated_at": raw["collected_at"], "artifact_sha256": "benlab-sha",
+                "contract": {"name": "benlab-actions", "schema_version": "1.1.0"},
+                "actions": [{
+                    "action_id": "benlab:homeauto", "project_id": "vault/homeauto.md",
+                    "project": "homeauto", "queue": "now", "queue_position": 1,
+                    "attention_state": "now", "current_commitment": True,
+                    "may_request_time_now": True, "next_action": "Save a receipt",
+                    "effort": "30m", "energy_fit": "screen-only",
+                    "required_stack": ["terminal", "repo"], "route": "repo_issue",
+                    "evidence": {"status": "missing", "blocker": False, "provenance": {}},
+                    "proof_mode": "source-repo proof", "warnings": [],
+                }],
+            },
+            "schedule": {"capacity": {
+                "artifact_sha256": "schedule-sha",
+                "contract": {"name": "schedule-capacity", "schema_version": "1.0.0"},
+                "inputs": {"benlab_artifact_sha256": "benlab-sha"},
+                "freshness": {"status": capacity_status, "warnings": []},
+                "results": [{
+                    "action_id": "benlab:homeauto", "project_id": "vault/homeauto.md",
+                    "project": "homeauto", "queue": "now", "queue_position": 1,
+                    "fit_status": fit_status, "capacity_block_id": "block:1",
+                    "capacity_start": "2026-09-10T15:00:00+00:00",
+                    "capacity_end": "2026-09-10T15:30:00+00:00",
+                    "source_freshness": capacity_status, "reason": "deterministic fit",
+                    "warnings": [],
+                }],
+            }},
+        }
+        return raw
+
     def test_curated_registry_selects_only_studio_machines(self):
         registry = json.loads(STUDIO_MACHINES.read_text())
         jsonschema.Draft202012Validator(json.loads(STUDIO_MACHINE_SCHEMA.read_text())).validate(registry)
@@ -289,6 +328,79 @@ class WorldStateTests(unittest.TestCase):
         raw["sources"][4]["observed_at"] = "2026-09-10T14:00:00+00:00"
         stale_situations = {item["id"]: item for item in world_state.interpret(raw, registry)["situations"]}
         self.assertNotIn("evidence-opportunity:homeauto", stale_situations)
+
+    def test_first_class_opportunity_preserves_authority_identity_and_explanation(self):
+        state = world_state.interpret(self.opportunity_raw(), studio_registry={"schema_version": "1.0.0", "machines": []})
+
+        self.assertEqual(state["contract"]["schema_version"], "1.1.0")
+        opportunity = state["opportunities"][0]
+        self.assertEqual(opportunity["opportunity_id"], "opportunity:benlab:homeauto")
+        self.assertEqual(opportunity["action_id"], "benlab:homeauto")
+        self.assertEqual(opportunity["state"], "available")
+        self.assertEqual(opportunity["action"]["authority"], "BenLab")
+        self.assertEqual(opportunity["action"]["queue_position"], 1)
+        self.assertEqual(opportunity["capacity"]["authority"], "schedule-assessment")
+        self.assertEqual(opportunity["affordances"]["required"], ["terminal", "repo"])
+        self.assertEqual(opportunity["affordances"]["missing"], [])
+        self.assertTrue(all(item.get("result") in {"pass", "unknown", "fail"} for item in opportunity["why"]))
+        self.assertEqual(state["inputs"]["benlab"]["artifact_sha256"], "benlab-sha")
+        self.assertEqual(state["inputs"]["schedule"]["artifact_sha256"], "schedule-sha")
+
+    def test_opportunity_states_materially_follow_capacity_runtime_and_eligibility(self):
+        stale = world_state.interpret(self.opportunity_raw(capacity_status="stale", fit_status="capacity_unknown"), studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(stale["opportunities"][0]["state"], "capacity_stale")
+
+        missing = self.opportunity_raw()
+        missing["sources"][0]["payload"] = {}
+        unavailable = world_state.interpret(missing, studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(unavailable["opportunities"][0]["state"], "missing_affordance")
+
+        ineligible = self.opportunity_raw()
+        ineligible["sources"][1]["payload"]["benlab"]["actions"][0]["may_request_time_now"] = False
+        denied = world_state.interpret(ineligible, studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(denied["opportunities"][0]["state"], "not_currently_eligible")
+
+        stale_runtime = self.opportunity_raw()
+        stale_runtime["sources"][0]["observed_at"] = "2026-09-10T14:00:00+00:00"
+        runtime = world_state.interpret(stale_runtime, studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(runtime["opportunities"][0]["state"], "runtime_stale")
+        self.assertIn("system:collector-host:0", runtime["opportunities"][0]["why"][-1]["source_ids"])
+
+        blocked = world_state.interpret(self.opportunity_raw(fit_status="blocked"), studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(blocked["opportunities"][0]["state"], "blocked")
+
+        unknown = self.opportunity_raw()
+        unknown["sources"][1]["payload"]["schedule"]["capacity"]["results"] = []
+        insufficient = world_state.interpret(unknown, studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(insufficient["opportunities"][0]["state"], "insufficient_information")
+
+    def test_research_background_and_generation_side_effects_stay_outside_opportunities(self):
+        raw = self.opportunity_raw()
+        raw["sources"][1]["payload"]["analyst"] = {
+            "recent_candidates": [{"card_id": "research-only", "working_title": "Interesting"}]
+        }
+        raw["sources"][1]["payload"]["benlab"]["actions"].append({
+            "action_id": "benlab:background", "project": "Background",
+            "attention_state": "background", "current_commitment": False,
+            "may_request_time_now": False, "required_stack": ["terminal"],
+        })
+        with mock.patch.object(world_state.subprocess, "run") as execute:
+            state = world_state.interpret(raw, studio_registry={"schema_version": "1.0.0", "machines": []})
+
+        self.assertEqual([item["action_id"] for item in state["opportunities"]], ["benlab:homeauto"])
+        execute.assert_not_called()
+
+    def test_opportunity_transitions_include_deterministic_cause_and_do_not_repeat(self):
+        registry = {"schema_version": "1.0.0", "machines": []}
+        previous = world_state.interpret(self.opportunity_raw(capacity_status="stale", fit_status="capacity_unknown"), studio_registry=registry)
+        current = world_state.interpret(self.opportunity_raw(), previous_state=previous, studio_registry=registry)
+        transition = next(item for item in current["transitions"] if item["situation_id"] == "opportunity:benlab:homeauto")
+        self.assertEqual((transition["from"], transition["to"]), ("capacity_stale", "available"))
+        self.assertTrue(transition["cause"])
+        self.assertIn("coordination:operator-snapshot:0", transition["source_ids"])
+
+        same = world_state.interpret(self.opportunity_raw(), previous_state=current, studio_registry=registry)
+        self.assertEqual(same["transitions"], current["transitions"])
 
     def test_active_needs_are_neutral_and_only_explicit_evidence_needs_get_evidence_opportunities(self):
         raw = json.loads(json.dumps(self.raw))

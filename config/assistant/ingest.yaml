@@ -6,7 +6,7 @@ roots:
   - /data/config
   - /data/scripts
   - /data/flows
-  - /data/coordination
+
 
 # File extensions we will treat as text.
 extensions:

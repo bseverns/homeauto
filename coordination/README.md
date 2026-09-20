@@ -18,8 +18,16 @@ benlab-local-analyst -- candidates --> BenLab -- commitments --> schedule-assess
 - **BenLab** owns significance, attention, and project commitments.
 - **schedule-assessment** owns read-only capacity and freshness assessment. A fit is
   not a scheduled event.
-- **homeauto** gathers summaries and records your explicit directives. It does not
+- **systems-atlas** owns canonical identities and registered cross-repository contracts.
+- **machine-docs** owns durable physical-machine configuration, maintenance, and safety truth.
+- **homeauto** owns runtime observations, deterministic readiness and opportunities,
+  scoped affordances, recent transitions, routines, and execution receipts. It does not
   silently promote research, reprioritize BenLab, or mutate a calendar.
+- **The human** remains authoritative for invocation, scheduling, commitment changes,
+  and canonical semantic decisions.
+
+The operating sequence is `observe → explain → present → intentionally invoke`.
+Availability never grants authorization.
 
 ## Refresh the console
 
@@ -33,8 +41,8 @@ make coordination-status
 
 This writes two ignored, local artifacts under `coordination/state/`:
 
-- `dashboard.md`: a human-readable view of current attention, capacity fit, recent
-  Analyst candidates, freshness warnings, and open directives.
+- `dashboard.md`: a human-readable view led by available, changed, blocked, and stale
+  opportunities; research remains a secondary section.
 - `snapshot.json`: the same information in a compact machine-readable contract.
 
 The snapshot intentionally omits Analyst source paths and evidence bodies. It keeps
@@ -58,16 +66,19 @@ nothing by themselves.
 
 ## Ask the local assistant
 
-The assistant ingest services mount `/data/coordination`, so after a refresh and
-ingest you can ask questions such as:
+The assistant API mounts only the current generated `world-state.json`. It injects a
+small allowlisted view of opportunities, machines, capabilities, transitions, and
+boundaries directly into each query. Coordination files are excluded from vector
+ingest and any older coordination vectors are filtered at query time. After a refresh
+you can ask questions such as:
 
 ```bash
 docker compose --profile assistant run --rm assistant-ingest
 ./scripts/ask "What is active now, what fits current capacity, and which reports are stale?"
 ```
 
-Only the distilled console artifacts and directives are added through this path;
-the assistant does not crawl the three neighboring repositories.
+The assistant consumes deterministic state downstream; natural-language output cannot
+change opportunity state. It does not crawl the neighboring repositories.
 
 ## Read-only world state
 
@@ -75,7 +86,7 @@ the assistant does not crawl the three neighboring repositories.
 
 - `coordination/state/world-telemetry.json` is the raw collector envelope.
 - `coordination/state/world-state.json` contains normalized observations and the
-  deterministic situations shown in `dashboard.md`.
+  deterministic situations and `lab-opportunities@1.0.0` records shown in `dashboard.md`.
 
 The contracts are [`raw-telemetry.schema.json`](./raw-telemetry.schema.json) and
 [`world-state.schema.json`](./world-state.schema.json); tests validate both with
@@ -103,6 +114,22 @@ masquerade as ready production resources. Capability summaries are derived from 
 machine rows and retain machine IDs as evidence. Machine readiness changes share the
 existing 100-entry bounded transition history; raw telemetry changes are not recorded.
 
+`homeauto-world-state@1.1.0` embeds the versioned opportunity contract without taking
+upstream authority. Each opportunity keeps separate `action`, `capacity`, and
+`affordances` structures, stable action identity where supplied, queue order,
+provenance, warnings, and deterministic `why` checks. States are `available`,
+`capacity_stale`, `runtime_stale`, `missing_affordance`, `blocked`,
+`insufficient_information`, and `not_currently_eligible`. Only fresh BenLab eligibility,
+fresh compatible capacity, and fresh same-scope affordances can produce `available`.
+State changes—not artifact rewrites with the same state—enter transition history.
+
+Known upstream limit: current `benlab-actions@1.1.0` does not emit `action_id`.
+`schedule-capacity@1.0.0` derives one from project path, project name, and action text;
+homeauto preserves that ID and warning but cannot make it stable across action-text
+edits. The capacity projection also omits BenLab activation reason and several evidence,
+readiness, public-safety, tag, and provenance fields. Homeauto therefore joins the
+capacity result back to the BenLab action summary and never infers absent fields.
+
 ## Operator routines
 
 `routines.json` owns stable launcher IDs and declarative invocation metadata; called
@@ -119,6 +146,7 @@ scripts/lab-console run monthly
 scripts/lab-console run refresh
 scripts/lab-console run benlab-refresh
 scripts/lab-console run capacity
+scripts/lab-console run capacity --action-id derived:... --opportunity-id opportunity:derived:...
 scripts/lab-console run analyst-scan --input /path/to/material --yes
 scripts/lab-console analyst find "current query" --limit 10
 scripts/lab-console analyst --model gemma4:12b ask "current question"
@@ -142,6 +170,9 @@ means the routine does not mutate source material or dispatch
 control actions; derived reports, receipts, and refreshed state may still be written.
 Daily and weekly are non-read-only because the existing guided BenLab script writes
 canonical practice notes.
+Receipts can bind an action/opportunity ID, record supplied inputs, return destination,
+artifacts and errors, and always keep `semantic_completion: false`. Exit code `0` means
+only that the routine completed; it never closes a BenLab action or proves a claim.
 
 Each observation records its source, observation time, freshness, sensitivity, and
 confidence. Every situation links to observation IDs and displays its fixed rule under
