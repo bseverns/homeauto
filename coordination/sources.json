@@ -10,12 +10,8 @@
       "authority": "The Analyst supplies non-binding research candidates only."
     },
     "schedule_capacity": {
-      "path": "../schedule-assessment/capacity_fit.csv",
+      "path": "../schedule-assessment/schedule_capacity.json",
       "authority": "schedule-assessment supplies read-only capacity fit, not calendar commitments."
-    },
-    "schedule_freshness": {
-      "path": "../schedule-assessment/artifact_freshness.json",
-      "authority": "schedule-assessment owns temporal-integrity reporting."
     }
   },
   "outputs": {

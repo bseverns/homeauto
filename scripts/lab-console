@@ -150,6 +150,45 @@ def summarize_analyst(path: Path, limit: int = 8) -> dict[str, Any]:
 
 
 def summarize_capacity(path: Path) -> dict[str, Any]:
+    if path.suffix == ".json":
+        payload = read_json(path)
+        contract = payload.get("contract", {})
+        if (
+            contract.get("name") != "schedule-capacity"
+            or contract.get("schema_version") != "1.0.0"
+            or contract.get("authority") != "read_only_capacity_evidence"
+            or contract.get("scheduling_authority") is not False
+            or contract.get("calendar_mutation_allowed") is not False
+        ):
+            raise ValueError(f"unsupported schedule capacity contract: {contract!r}")
+        freshness = payload.get("freshness", {})
+        if freshness.get("status") != "fresh" and any(item.get("fit_status") == "fits" for item in payload.get("results", [])):
+            raise ValueError("schedule capacity contract contains fits without fresh capacity evidence")
+        fits = []
+        for item in payload.get("results", []):
+            if item.get("fit_status") != "fits":
+                continue
+            fits.append({
+                "action_id": item.get("action_id"),
+                "project_id": item.get("project_id"),
+                "project": item.get("project"),
+                "queue": item.get("queue"),
+                "queue_position": item.get("queue_position"),
+                "next_action": item.get("action"),
+                "effort": item.get("effort"),
+                "energy_fit": item.get("energy_fit"),
+                "block_start": item.get("capacity_start"),
+                "block_end": item.get("capacity_end"),
+                "temporal_status": item.get("source_freshness"),
+            })
+        return {
+            "contract": contract,
+            "freshness": freshness,
+            "result_count": len(payload.get("results", [])),
+            "fit_count": len(fits),
+            "fits": fits,
+        }
+
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     fields = (
@@ -452,6 +491,7 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     routine_receipts, receipt_errors = load_routine_receipts()
     warnings.extend(directive_errors)
     warnings.extend(receipt_errors)
+    capacity = load_summary("schedule_capacity", summarize_capacity)
     snapshot = {
         "contract": {
             "name": "benlab-operator-snapshot",
@@ -463,8 +503,8 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         "benlab": load_summary("benlab_actions", summarize_benlab),
         "analyst": load_summary("analyst_promotions", summarize_analyst),
         "schedule": {
-            "capacity": load_summary("schedule_capacity", summarize_capacity),
-            "freshness": load_summary("schedule_freshness", summarize_freshness),
+            "capacity": capacity,
+            "freshness": capacity.get("freshness", {}) if capacity else {},
         },
         "directives": directives,
         "routine_receipts": routine_receipts,
@@ -740,7 +780,7 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
     freshness = snapshot.get("schedule", {}).get("freshness") or {}
     all_warnings = list(snapshot.get("warnings", []))
     all_warnings.extend(
-        f"{item.get('path')}: {item.get('warning')}"
+        f"{item.get('path')}: {item.get('warning')}" if isinstance(item, dict) else str(item)
         for item in freshness.get("warnings", [])
     )
     lines.extend(["", "## Warnings", ""])

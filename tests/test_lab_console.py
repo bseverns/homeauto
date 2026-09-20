@@ -17,6 +17,48 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    def test_schedule_capacity_json_is_consumed_without_scheduling_authority(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "schedule_capacity.json"
+            path.write_text(json.dumps({
+                "contract": {
+                    "name": "schedule-capacity", "schema_version": "1.0.0",
+                    "authority": "read_only_capacity_evidence", "scheduling_authority": False,
+                    "calendar_mutation_allowed": False,
+                },
+                "freshness": {"status": "fresh", "warnings": []},
+                "results": [
+                    {"action_id": "benlab:one", "project_id": "p/one.md", "project": "one", "queue": "now", "queue_position": 1, "action": "A", "effort": "30m", "energy_fit": "screen-only", "fit_status": "fits", "capacity_start": "2026-09-19T10:00:00-05:00", "capacity_end": "2026-09-19T11:00:00-05:00", "source_freshness": "fresh"},
+                    {"project": "two", "action": "B", "fit_status": "capacity_unknown"},
+                ],
+            }))
+
+            summary = lab_console.summarize_capacity(path)
+
+            self.assertEqual(summary["result_count"], 2)
+            self.assertEqual(summary["fit_count"], 1)
+            self.assertEqual(summary["fits"][0]["project"], "one")
+            self.assertEqual(summary["fits"][0]["action_id"], "benlab:one")
+            self.assertEqual(summary["fits"][0]["queue_position"], 1)
+            self.assertFalse(summary["contract"]["scheduling_authority"])
+
+    def test_schedule_capacity_json_rejects_authority_or_freshness_violation(self):
+        base = {
+            "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False},
+            "freshness": {"status": "stale"},
+            "results": [{"fit_status": "fits"}],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "schedule_capacity.json"
+            path.write_text(json.dumps(base))
+            with self.assertRaises(ValueError):
+                lab_console.summarize_capacity(path)
+            base["freshness"]["status"] = "fresh"
+            base["contract"]["calendar_mutation_allowed"] = True
+            path.write_text(json.dumps(base))
+            with self.assertRaises(ValueError):
+                lab_console.summarize_capacity(path)
+
     def test_routine_registry_has_operator_shortcuts(self):
         registry = lab_console.load_routines(ROOT / "coordination" / "routines.json")
         self.assertEqual(
