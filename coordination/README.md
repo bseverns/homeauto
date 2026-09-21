@@ -123,11 +123,12 @@ provenance, warnings, and deterministic `why` checks. States are `available`,
 fresh compatible capacity, and fresh same-scope affordances can produce `available`.
 State changes—not artifact rewrites with the same state—enter transition history.
 
-Known upstream limit: current `benlab-actions@1.1.0` does not emit `action_id`.
-`schedule-capacity@1.0.0` derives one from project path, project name, and action text;
-homeauto preserves that ID and warning but cannot make it stable across action-text
-edits. The capacity projection also omits BenLab activation reason and several evidence,
-readiness, public-safety, tag, and provenance fields. Homeauto therefore joins the
+For `benlab-actions@1.2.0`, homeauto validates the consumed export against the
+pinned upstream compatibility schema and preserves BenLab's stable `action_id` through
+normalized actions and derived opportunities. Schedule-capacity identifiers remain
+source-correlation evidence only: they cannot create or replace action identity for a
+1.2.0 action. The capacity projection also omits BenLab activation reason and several
+evidence, readiness, public-safety, tag, and provenance fields. Homeauto therefore joins the
 capacity result back to the BenLab action summary and never infers absent fields.
 
 ## Operator routines
@@ -146,7 +147,7 @@ scripts/lab-console run monthly
 scripts/lab-console run refresh
 scripts/lab-console run benlab-refresh
 scripts/lab-console run capacity
-scripts/lab-console run capacity --action-id derived:... --opportunity-id opportunity:derived:...
+scripts/lab-console run capacity --action-id benlab-action:<root>:<generation> --opportunity-id opportunity:benlab-action:<root>:<generation>
 scripts/lab-console run analyst-scan --input /path/to/material --yes
 scripts/lab-console analyst find "current query" --limit 10
 scripts/lab-console analyst --model gemma4:12b ask "current question"

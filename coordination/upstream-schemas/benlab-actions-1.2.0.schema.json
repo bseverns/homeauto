@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "benlab-actions-1.2.0.schema.json",
+  "title": "BenLab action export 1.2.0 compatibility contract",
+  "type": "object",
+  "required": ["generated_at", "contract", "queues", "actions", "sleeping"],
+  "properties": {
+    "generated_at": {"type": "string", "format": "date-time"},
+    "contract": {
+      "type": "object",
+      "required": ["name", "schema_version", "action_identity_field", "calendar_data", "prose_inference_allowed"],
+      "properties": {
+        "name": {"const": "benlab-actions"},
+        "schema_version": {"const": "1.2.0"},
+        "action_identity_field": {"const": "action_id"},
+        "calendar_data": {"const": false},
+        "prose_inference_allowed": {"const": false}
+      }
+    },
+    "queues": {
+      "type": "object",
+      "required": ["now", "next", "sleeping", "background"],
+      "properties": {
+        "now": {"type": "array", "items": {"type": "string"}},
+        "next": {"type": "array", "items": {"type": "string"}},
+        "sleeping": {"type": "array", "items": {"type": "string"}},
+        "background": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+    "sleeping": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["action_id", "project", "status", "attention", "attention_state", "next_action"],
+      "properties": {
+        "action_id": {"type": ["string", "null"], "pattern": "^benlab-action:[0-9a-f]{16}:[1-9][0-9]*$"},
+        "project": {"type": "string", "minLength": 1},
+        "status": {"type": ["string", "null"]},
+        "attention": {"enum": ["now", "next", "background"]},
+        "attention_state": {"enum": ["now", "next", "background", "sleeping"]},
+        "next_action": {"type": ["string", "null"]}
+      },
+      "allOf": [{
+        "if": {
+          "properties": {
+            "status": {"enum": ["active", "emerging"]},
+            "attention": {"enum": ["now", "next"]},
+            "next_action": {"type": "string", "minLength": 1}
+          },
+          "required": ["status", "attention", "next_action"]
+        },
+        "then": {"properties": {"action_id": {"type": "string"}}}
+      }]
+    }
+  }
+}

@@ -53,7 +53,7 @@ def freshness(observed_at: str | None, collected_at: str, limit: int) -> dict[st
 def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
     sources = payload.get("sources", {})
     needs = payload.get("benlab", {}).get("now", [])
-    fits = payload.get("schedule", {}).get("capacity", {}).get("fits", [])
+    fits = (payload.get("schedule", {}).get("capacity") or {}).get("fits", [])
     summary = {
         "generated_at": payload.get("generated_at"),
         "source_availability": {
@@ -211,6 +211,7 @@ def derive_opportunities(
     coordination = next((item for item in observations if item["source"].get("semantic") == "benlab_context"), None)
     context = coordination.get("value", {}) if coordination else {}
     benlab = context.get("benlab", {}) if isinstance(context, dict) else {}
+    benlab_schema_version = (benlab.get("contract") or {}).get("schema_version")
     capacity_document = context.get("capacity", {}) if isinstance(context, dict) else {}
     inputs = {
         "benlab": {
@@ -280,7 +281,9 @@ def derive_opportunities(
     opportunities = []
     for source_action in actions:
         capacity = capacity_for(source_action)
-        action_id = source_action.get("action_id") or (capacity or {}).get("action_id")
+        action_id = source_action.get("action_id")
+        if not action_id and benlab_schema_version in {"1.0.0", "1.1.0", None}:
+            action_id = (capacity or {}).get("action_id")
         if not action_id:
             continue
         action = {**source_action, "authority": "BenLab", "action_id": action_id}
@@ -356,7 +359,10 @@ def derive_opportunities(
             why.append(_why("runtime_affordances", "fail", "No fresh provider satisfies every required affordance.", provider_ids))
 
         warnings = list(action.get("warnings") or []) + list((capacity or {}).get("warnings") or [])
-        if source_action.get("action_id") is None:
+        if (
+            source_action.get("action_id") is None
+            and benlab_schema_version in {"1.0.0", "1.1.0", None}
+        ):
             warnings.append("action_id originated in schedule-assessment because BenLab did not supply one")
         opportunities.append({
             "opportunity_id": f"opportunity:{action_id}",

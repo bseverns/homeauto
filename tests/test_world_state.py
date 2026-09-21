@@ -18,6 +18,21 @@ STUDIO_MACHINE_SCHEMA = ROOT / "coordination" / "studio-machines.schema.json"
 
 
 class WorldStateTests(unittest.TestCase):
+    def test_coordination_summary_handles_unavailable_schedule_capacity(self):
+        summary = world_state._coordination_summary(
+            {
+                "generated_at": "2026-09-21T12:00:00Z",
+                "sources": {},
+                "benlab": {"now": []},
+                "schedule": {"capacity": None},
+                "warnings": [],
+                "directives": [],
+            }
+        )
+
+        self.assertEqual(summary["capacity_projects"], [])
+        self.assertNotIn("capacity", summary)
+
     def setUp(self):
         self.raw = json.loads(
             (ROOT / "tests" / "fixtures" / "world-state" / "raw.json").read_text()
@@ -345,6 +360,33 @@ class WorldStateTests(unittest.TestCase):
         self.assertTrue(all(item.get("result") in {"pass", "unknown", "fail"} for item in opportunity["why"]))
         self.assertEqual(state["inputs"]["benlab"]["artifact_sha256"], "benlab-sha")
         self.assertEqual(state["inputs"]["schedule"]["artifact_sha256"], "schedule-sha")
+
+    def test_benlab_1_2_identity_wins_over_schedule_assessment_identity(self):
+        raw = self.opportunity_raw()
+        benlab = raw["sources"][1]["payload"]["benlab"]
+        schedule = raw["sources"][1]["payload"]["schedule"]["capacity"]
+        benlab["contract"]["schema_version"] = "1.2.0"
+        benlab["actions"][0]["action_id"] = "benlab-action:0123456789abcdef:1"
+        schedule["results"][0]["action_id"] = "schedule-derived:must-not-be-used"
+
+        state = world_state.interpret(raw, studio_registry={"schema_version": "1.0.0", "machines": []})
+
+        opportunity = state["opportunities"][0]
+        self.assertEqual(opportunity["action_id"], "benlab-action:0123456789abcdef:1")
+        self.assertEqual(opportunity["opportunity_id"], "opportunity:benlab-action:0123456789abcdef:1")
+        self.assertNotIn("schedule-assessment because", json.dumps(opportunity["warnings"]))
+
+    def test_benlab_1_2_action_without_identity_is_not_repaired_from_schedule(self):
+        raw = self.opportunity_raw()
+        benlab = raw["sources"][1]["payload"]["benlab"]
+        schedule = raw["sources"][1]["payload"]["schedule"]["capacity"]
+        benlab["contract"]["schema_version"] = "1.2.0"
+        benlab["actions"][0]["action_id"] = None
+        schedule["results"][0]["action_id"] = "schedule-derived:must-not-be-used"
+
+        state = world_state.interpret(raw, studio_registry={"schema_version": "1.0.0", "machines": []})
+
+        self.assertEqual(state["opportunities"], [])
 
     def test_opportunity_states_materially_follow_capacity_runtime_and_eligibility(self):
         stale = world_state.interpret(self.opportunity_raw(capacity_status="stale", fit_status="capacity_unknown"), studio_registry={"schema_version": "1.0.0", "machines": []})

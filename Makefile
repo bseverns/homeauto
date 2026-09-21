@@ -22,12 +22,12 @@ restore-check:
 	ops/backup/restore-check.sh
 
 coordination-refresh:
-	python3 scripts/lab-console refresh
+	uv run --with-requirements requirements.txt scripts/lab-console refresh
 	python3 scripts/world_state.py
-	python3 scripts/lab-console refresh
+	uv run --with-requirements requirements.txt scripts/lab-console refresh
 
 coordination-status:
-	python3 scripts/lab-console status
+	uv run --with-requirements requirements.txt scripts/lab-console status
 
 coordination-directive:
 	@echo 'Usage: python3 scripts/lab-console new-directive TARGET "INSTRUCTION" [options]'

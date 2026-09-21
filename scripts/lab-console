@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import jsonschema
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "coordination" / "sources.json"
@@ -24,6 +26,7 @@ DIRECTIVES_DIR = ROOT / "coordination" / "directives"
 WORLD_STATE_PATH = ROOT / "coordination" / "state" / "world-state.json"
 ROUTINES_PATH = ROOT / "coordination" / "routines.json"
 ROUTINE_RECEIPTS_DIR = ROOT / "coordination" / "state" / "routine-receipts"
+BENLAB_1_2_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "benlab-actions-1.2.0.schema.json"
 TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
 ACTION_TYPES = (
     "review_candidate",
@@ -91,10 +94,25 @@ def source_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
 def summarize_benlab(path: Path) -> dict[str, Any]:
     payload = read_json(path)
     contract = payload.get("contract", {})
+    schema_version = contract.get("schema_version")
+    if schema_version == "1.2.0":
+        schema = read_json(BENLAB_1_2_SCHEMA)
+        try:
+            jsonschema.Draft202012Validator(
+                schema, format_checker=jsonschema.FormatChecker()
+            ).validate(payload)
+        except jsonschema.ValidationError as exc:
+            location = ".".join(str(part) for part in exc.absolute_path) or "document"
+            raise ValueError(
+                f"BenLab action export does not conform to schema 1.2.0 at {location}: {exc.message}"
+            ) from exc
     if (
         contract.get("name") != "benlab-actions"
-        or contract.get("schema_version") not in {"1.0.0", "1.1.0"}
-        or contract.get("authority") != "human-authored project attention metadata"
+        or schema_version not in {"1.0.0", "1.1.0", "1.2.0"}
+        or (
+            schema_version in {"1.0.0", "1.1.0"}
+            and contract.get("authority") != "human-authored project attention metadata"
+        )
         or contract.get("prose_inference_allowed") is not False
         or not valid_datetime(payload.get("generated_at"))
     ):
@@ -254,7 +272,7 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
         source_hash = inputs.get("benlab_artifact_sha256")
         if (
             inputs.get("benlab_contract_name") != "benlab-actions"
-            or inputs.get("benlab_schema_version") not in {"1.0.0", "1.1.0"}
+            or inputs.get("benlab_schema_version") not in {"1.0.0", "1.1.0", "1.2.0"}
             or (source_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", str(source_hash)))
         ):
             raise ValueError(f"invalid schedule capacity input: {inputs!r}")

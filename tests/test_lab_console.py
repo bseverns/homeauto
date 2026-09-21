@@ -17,6 +17,37 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    def test_benlab_1_2_contract_is_validated_and_preserves_authoritative_action_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "benlab-actions.json"
+            payload = {
+                "generated_at": "2026-09-20T00:00:00+00:00",
+                "contract": {
+                    "name": "benlab-actions", "schema_version": "1.2.0",
+                    "action_identity_field": "action_id", "calendar_data": False,
+                    "prose_inference_allowed": False,
+                },
+                "queues": {"now": ["one"], "next": [], "sleeping": [], "background": []},
+                "actions": [{
+                    "action_id": "benlab-action:0123456789abcdef:1",
+                    "path": "vault/one.md", "project": "one", "status": "active",
+                    "attention": "now", "attention_state": "now",
+                    "next_action": "Do one thing",
+                }],
+                "sleeping": [],
+            }
+            path.write_text(json.dumps(payload))
+
+            summary = lab_console.summarize_benlab(path)
+
+            self.assertEqual(summary["contract"]["schema_version"], "1.2.0")
+            self.assertEqual(summary["actions"][0]["action_id"], "benlab-action:0123456789abcdef:1")
+
+            payload["actions"][0]["action_id"] = None
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "does not conform to schema 1.2.0"):
+                lab_console.summarize_benlab(path)
+
     def test_benlab_contract_is_versioned_and_preserves_action_semantics(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "benlab-actions.json"
@@ -66,7 +97,7 @@ class LabConsoleTests(unittest.TestCase):
                     "calendar_mutation_allowed": False, "prose_inference_allowed": False,
                     "generated_at": "2026-09-20T00:00:00+00:00",
                 },
-                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "a" * 64},
+                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0", "benlab_artifact_sha256": "a" * 64},
                 "freshness": {"status": "fresh", "warnings": []},
                 "results": [
                     {"action_id": "benlab:one", "project_id": "p/one.md", "project": "one", "queue": "now", "queue_position": 1, "action": "A", "effort": "30m", "energy_fit": "screen-only", "fit_status": "fits", "capacity_start": "2026-09-19T10:00:00-05:00", "capacity_end": "2026-09-19T11:00:00-05:00", "source_freshness": "fresh"},
@@ -613,11 +644,14 @@ class LabConsoleTests(unittest.TestCase):
 
             receipt = lab_console.run_routine(
                 "sample", registry, root / "receipts", refresh_world_state=False,
-                action_id="benlab:a", opportunity_id="opportunity:benlab:a",
+                action_id="benlab-action:0123456789abcdef:1",
+                opportunity_id="opportunity:benlab-action:0123456789abcdef:1",
             )
 
-        self.assertEqual(receipt["action_id"], "benlab:a")
-        self.assertEqual(receipt["opportunity_id"], "opportunity:benlab:a")
+        self.assertEqual(receipt["action_id"], "benlab-action:0123456789abcdef:1")
+        self.assertEqual(
+            receipt["opportunity_id"], "opportunity:benlab-action:0123456789abcdef:1"
+        )
         self.assertFalse(receipt["canonical_source_changed"])
         self.assertFalse(receipt["semantic_completion"])
 
