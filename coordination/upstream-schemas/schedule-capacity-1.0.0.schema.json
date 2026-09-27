@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schedule-capacity-1.0.0.schema.json",
+  "title": "Schedule capacity 1.0.0",
+  "type": "object",
+  "required": ["contract", "inputs", "freshness", "results"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "required": ["name", "schema_version", "authority", "generated_at", "prose_inference_allowed", "scheduling_authority", "calendar_mutation_allowed"],
+      "properties": {
+        "name": {"const": "schedule-capacity"},
+        "schema_version": {"const": "1.0.0"},
+        "authority": {"const": "read_only_capacity_evidence"},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "prose_inference_allowed": {"const": false},
+        "scheduling_authority": {"const": false},
+        "calendar_mutation_allowed": {"const": false}
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["benlab_contract_name", "benlab_schema_version", "benlab_generated_at", "benlab_artifact_sha256", "capacity_sources"],
+      "properties": {
+        "benlab_contract_name": {"const": "benlab-actions"},
+        "benlab_schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0"]},
+        "benlab_generated_at": {"type": "string", "format": "date-time"},
+        "benlab_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "capacity_sources": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "required": ["artifact"],
+                "properties": {"artifact": {"const": "calendar_snapshot.json"}}
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "type": "object",
+                "required": ["artifact"],
+                "properties": {"artifact": {"const": "calendar_free_blocks_next14.csv"}}
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": ["artifact", "sha256", "status", "generated_at", "window", "timezone", "warnings"],
+            "properties": {
+              "artifact": {"type": "string", "minLength": 1},
+              "sha256": {"$ref": "#/$defs/sha256"},
+              "status": {"enum": ["fresh", "stale", "historical", "unknown"]},
+              "generated_at": {"type": ["string", "null"]},
+              "window": {
+                "type": "object",
+                "required": ["start", "end"],
+                "properties": {
+                  "start": {"type": ["string", "null"]},
+                  "end": {"type": ["string", "null"]}
+                }
+              },
+              "timezone": {"type": ["string", "null"]},
+              "warnings": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "freshness": {"$ref": "#/$defs/freshness"},
+    "results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/result"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "freshness": {
+      "type": "object",
+      "required": ["status", "warnings"],
+      "properties": {
+        "status": {"enum": ["fresh", "stale", "historical", "unknown"]},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["action_id", "action_id_origin", "project_id", "project", "action", "attention_state", "queue", "queue_position", "current_commitment", "may_request_time_now", "fit_status", "effort", "energy_fit", "required_stack", "route", "evidence_blocker", "proof_mode", "source_path", "evidence_provenance", "reason", "source_freshness", "confidence", "warnings", "capacity_block_id", "capacity_start", "capacity_end"],
+      "properties": {
+        "action_id": {"type": "string", "minLength": 1},
+        "action_id_origin": {"enum": ["benlab", "derived"]},
+        "project_id": {"type": "string", "minLength": 1},
+        "project": {"type": "string", "minLength": 1},
+        "action": {"type": ["string", "null"]},
+        "attention_state": {"type": ["string", "null"]},
+        "queue": {"enum": ["now", "next"]},
+        "queue_position": {"type": "integer", "minimum": 1},
+        "current_commitment": {"type": ["boolean", "null"]},
+        "may_request_time_now": {"type": ["boolean", "null"]},
+        "fit_status": {"enum": ["fits", "does_not_fit", "blocked", "capacity_unknown", "insufficient_information"]},
+        "effort": {"type": ["string", "null"]},
+        "energy_fit": {"type": ["string", "null"]},
+        "required_stack": {"type": ["array", "null"], "items": {"type": "string"}},
+        "route": {"type": ["string", "null"]},
+        "evidence_blocker": {"type": ["boolean", "null"]},
+        "proof_mode": {"type": ["string", "null"]},
+        "source_path": {"type": ["string", "null"]},
+        "evidence_provenance": {"type": "object"},
+        "reason": {"type": "string", "minLength": 1},
+        "source_freshness": {"enum": ["fresh", "stale", "historical", "unknown"]},
+        "confidence": {"enum": ["high", "low"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "capacity_block_id": {"type": ["string", "null"]},
+        "capacity_start": {"type": ["string", "null"]},
+        "capacity_end": {"type": ["string", "null"]}
+      },
+      "not": {"required": ["blockers"]}
+    }
+  }
+}

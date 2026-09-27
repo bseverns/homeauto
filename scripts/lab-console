@@ -27,6 +27,7 @@ WORLD_STATE_PATH = ROOT / "coordination" / "state" / "world-state.json"
 ROUTINES_PATH = ROOT / "coordination" / "routines.json"
 ROUTINE_RECEIPTS_DIR = ROOT / "coordination" / "state" / "routine-receipts"
 BENLAB_1_2_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "benlab-actions-1.2.0.schema.json"
+SCHEDULE_CAPACITY_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "schedule-capacity-1.0.0.schema.json"
 TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
 ACTION_TYPES = (
     "review_candidate",
@@ -257,6 +258,16 @@ def summarize_analyst(path: Path, limit: int = 8) -> dict[str, Any]:
 def summarize_capacity(path: Path) -> dict[str, Any]:
     if path.suffix == ".json":
         payload = read_json(path)
+        schema = read_json(SCHEDULE_CAPACITY_SCHEMA)
+        try:
+            jsonschema.Draft202012Validator(
+                schema, format_checker=jsonschema.FormatChecker()
+            ).validate(payload)
+        except jsonschema.ValidationError as exc:
+            location = ".".join(str(part) for part in exc.absolute_path) or "document"
+            raise ValueError(
+                f"schedule capacity export does not conform to schema 1.0.0 at {location}: {exc.message}"
+            ) from exc
         contract = payload.get("contract", {})
         if (
             contract.get("name") != "schedule-capacity"

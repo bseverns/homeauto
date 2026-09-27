@@ -17,6 +17,18 @@ LOADER.exec_module(lab_console)
 
 
 class LabConsoleTests(unittest.TestCase):
+    @staticmethod
+    def capacity_sources():
+        source = {
+            "status": "fresh", "generated_at": "2026-09-20T00:00:00+00:00",
+            "window": {"start": "2026-09-20T00:00:00+00:00", "end": "2026-09-21T00:00:00+00:00"},
+            "timezone": "UTC", "warnings": [],
+        }
+        return [
+            {"artifact": "calendar_snapshot.json", "sha256": "b" * 64, **source},
+            {"artifact": "calendar_free_blocks_next14.csv", "sha256": "c" * 64, **source},
+        ]
+
     def test_benlab_1_2_contract_is_validated_and_preserves_authoritative_action_id(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "benlab-actions.json"
@@ -90,20 +102,37 @@ class LabConsoleTests(unittest.TestCase):
     def test_schedule_capacity_json_is_consumed_without_scheduling_authority(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "schedule_capacity.json"
-            path.write_text(json.dumps({
+            base_result = {
+                "action_id": "benlab:one", "action_id_origin": "benlab", "project_id": "p/one.md",
+                "project": "one", "action": "A", "attention_state": "now", "queue": "now",
+                "queue_position": 1, "current_commitment": True, "may_request_time_now": True,
+                "fit_status": "fits", "effort": "30m", "energy_fit": "screen-only",
+                "required_stack": [], "route": None, "evidence_blocker": False, "proof_mode": None,
+                "source_path": "p/one.md", "evidence_provenance": {}, "reason": "fits",
+                "source_freshness": "fresh", "confidence": "high", "warnings": [],
+                "capacity_block_id": "block:1", "capacity_start": "2026-09-19T10:00:00-05:00",
+                "capacity_end": "2026-09-19T11:00:00-05:00",
+            }
+            payload = {
                 "contract": {
                     "name": "schedule-capacity", "schema_version": "1.0.0",
                     "authority": "read_only_capacity_evidence", "scheduling_authority": False,
                     "calendar_mutation_allowed": False, "prose_inference_allowed": False,
                     "generated_at": "2026-09-20T00:00:00+00:00",
                 },
-                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0", "benlab_artifact_sha256": "a" * 64},
+                "inputs": {
+                    "benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0",
+                    "benlab_generated_at": "2026-09-20T00:00:00+00:00",
+                    "benlab_artifact_sha256": "a" * 64,
+                    "capacity_sources": self.capacity_sources(),
+                },
                 "freshness": {"status": "fresh", "warnings": []},
                 "results": [
-                    {"action_id": "benlab:one", "project_id": "p/one.md", "project": "one", "queue": "now", "queue_position": 1, "action": "A", "effort": "30m", "energy_fit": "screen-only", "fit_status": "fits", "capacity_start": "2026-09-19T10:00:00-05:00", "capacity_end": "2026-09-19T11:00:00-05:00", "source_freshness": "fresh"},
-                    {"project": "two", "action": "B", "fit_status": "capacity_unknown"},
+                    base_result,
+                    {**base_result, "action_id": "benlab:two", "project_id": "p/two.md", "project": "two", "action": "B", "fit_status": "capacity_unknown", "capacity_block_id": None, "capacity_start": None, "capacity_end": None},
                 ],
-            }))
+            }
+            path.write_text(json.dumps(payload))
 
             summary = lab_console.summarize_capacity(path)
 
@@ -117,6 +146,28 @@ class LabConsoleTests(unittest.TestCase):
             self.assertEqual(summary["inputs"]["benlab_artifact_sha256"], "a" * 64)
             self.assertEqual(summary["contract"]["generated_at"], "2026-09-20T00:00:00+00:00")
             self.assertEqual(summary["artifact_sha256"], lab_console.sha256_file(path))
+
+    def test_schedule_capacity_schema_rejects_missing_capacity_source_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "schedule_capacity.json"
+            path.write_text(json.dumps({
+                "contract": {
+                    "name": "schedule-capacity", "schema_version": "1.0.0",
+                    "authority": "read_only_capacity_evidence", "scheduling_authority": False,
+                    "calendar_mutation_allowed": False, "prose_inference_allowed": False,
+                    "generated_at": "2026-09-20T00:00:00+00:00",
+                },
+                "inputs": {
+                    "benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0",
+                    "benlab_generated_at": "2026-09-20T00:00:00+00:00",
+                    "benlab_artifact_sha256": "a" * 64,
+                },
+                "freshness": {"status": "fresh", "warnings": []},
+                "results": [],
+            }))
+
+            with self.assertRaisesRegex(ValueError, "does not conform to schema 1.0.0"):
+                lab_console.summarize_capacity(path)
 
     def test_benlab_actions_are_normalized_in_authoritative_queue_order(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -149,7 +200,7 @@ class LabConsoleTests(unittest.TestCase):
             schedule_path = root / "schedule.json"
             schedule_path.write_text(json.dumps({
                 "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False, "prose_inference_allowed": False, "generated_at": "2026-09-20T00:00:00+00:00"},
-                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "b" * 64},
+                "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_generated_at": "2026-09-20T00:00:00+00:00", "benlab_artifact_sha256": "b" * 64, "capacity_sources": self.capacity_sources()},
                 "freshness": {"status": "fresh", "warnings": []}, "results": [],
             }))
             config = root / "sources.json"
@@ -164,11 +215,21 @@ class LabConsoleTests(unittest.TestCase):
         self.assertTrue(any("does not match loaded BenLab artifact" in item for item in snapshot["warnings"]))
 
     def test_schedule_capacity_json_rejects_authority_or_freshness_violation(self):
+        result = {
+            "action_id": "benlab:one", "action_id_origin": "benlab", "project_id": "p/one.md",
+            "project": "one", "action": "A", "attention_state": "now", "queue": "now",
+            "queue_position": 1, "current_commitment": True, "may_request_time_now": True,
+            "fit_status": "fits", "effort": "30m", "energy_fit": None, "required_stack": [],
+            "route": None, "evidence_blocker": False, "proof_mode": None, "source_path": "p/one.md",
+            "evidence_provenance": {}, "reason": "fits", "source_freshness": "fresh",
+            "confidence": "high", "warnings": [], "capacity_block_id": "block:1",
+            "capacity_start": "2026-09-20T10:00:00+00:00", "capacity_end": "2026-09-20T10:30:00+00:00",
+        }
         base = {
             "contract": {"name": "schedule-capacity", "schema_version": "1.0.0", "authority": "read_only_capacity_evidence", "scheduling_authority": False, "calendar_mutation_allowed": False, "prose_inference_allowed": False, "generated_at": "2026-09-20T00:00:00+00:00"},
-            "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_artifact_sha256": "a" * 64},
-            "freshness": {"status": "stale"},
-            "results": [{"fit_status": "fits"}],
+            "inputs": {"benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.1.0", "benlab_generated_at": "2026-09-20T00:00:00+00:00", "benlab_artifact_sha256": "a" * 64, "capacity_sources": self.capacity_sources()},
+            "freshness": {"status": "stale", "warnings": []},
+            "results": [result],
         }
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "schedule_capacity.json"
@@ -183,7 +244,7 @@ class LabConsoleTests(unittest.TestCase):
             base["contract"]["calendar_mutation_allowed"] = False
             base["inputs"]["benlab_artifact_sha256"] = "not-a-sha256"
             path.write_text(json.dumps(base))
-            with self.assertRaisesRegex(ValueError, "invalid schedule capacity input"):
+            with self.assertRaisesRegex(ValueError, "does not conform to schema 1.0.0"):
                 lab_console.summarize_capacity(path)
 
     def test_routine_registry_has_operator_shortcuts(self):

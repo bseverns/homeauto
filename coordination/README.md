@@ -125,11 +125,12 @@ State changes—not artifact rewrites with the same state—enter transition his
 
 For `benlab-actions@1.2.0`, homeauto validates the consumed export against the
 pinned upstream compatibility schema and preserves BenLab's stable `action_id` through
-normalized actions and derived opportunities. Schedule-capacity identifiers remain
-source-correlation evidence only: they cannot create or replace action identity for a
-1.2.0 action. The capacity projection also omits BenLab activation reason and several
-evidence, readiness, public-safety, tag, and provenance fields. Homeauto therefore joins the
-capacity result back to the BenLab action summary and never infers absent fields.
+normalized actions and derived opportunities. A schedule-capacity result joins a 1.2.0
+action only when its `action_id` exactly matches; project and action-text fallback remains
+legacy-only. Homeauto also validates `schedule-capacity@1.0.0` against its pinned upstream
+schema before consuming it. The capacity projection omits BenLab activation reason and
+several evidence, readiness, public-safety, tag, and provenance fields, so homeauto joins
+capacity back to the BenLab summary without inferring absent fields.
 
 ## Operator routines
 

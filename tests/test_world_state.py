@@ -388,6 +388,20 @@ class WorldStateTests(unittest.TestCase):
 
         self.assertEqual(state["opportunities"], [])
 
+    def test_benlab_1_2_capacity_join_requires_exact_action_id(self):
+        raw = self.opportunity_raw()
+        benlab = raw["sources"][1]["payload"]["benlab"]
+        schedule = raw["sources"][1]["payload"]["schedule"]["capacity"]
+        benlab["contract"]["schema_version"] = "1.2.0"
+        benlab["actions"][0]["action_id"] = "benlab-action:0123456789abcdef:1"
+        schedule["results"][0]["action_id"] = "benlab-action:fedcba9876543210:1"
+
+        state = world_state.interpret(raw, studio_registry={"schema_version": "1.0.0", "machines": []})
+
+        opportunity = state["opportunities"][0]
+        self.assertEqual(opportunity["state"], "insufficient_information")
+        self.assertIsNone(opportunity["capacity"])
+
     def test_opportunity_states_materially_follow_capacity_runtime_and_eligibility(self):
         stale = world_state.interpret(self.opportunity_raw(capacity_status="stale", fit_status="capacity_unknown"), studio_registry={"schema_version": "1.0.0", "machines": []})
         self.assertEqual(stale["opportunities"][0]["state"], "capacity_stale")

@@ -247,7 +247,7 @@ def derive_opportunities(
         action_id = action.get("action_id")
         if action_id:
             match = next((item for item in capacity_results if item.get("action_id") == action_id), None)
-            if match:
+            if match or benlab_schema_version == "1.2.0":
                 return match
         return next((
             item for item in capacity_results
