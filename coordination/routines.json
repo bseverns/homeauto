@@ -131,14 +131,14 @@
     {
       "id": "capacity",
       "label": "Capacity Assessment",
-      "description": "Run schedule-assessment's existing capacity refresh.",
+      "description": "Regenerate canonical free-block and capacity artifacts from current read-only source evidence, then validate freshness and schema.",
       "target": "schedule-assessment",
       "adapter": "coordination/adapters/command",
       "cwd": "../schedule-assessment",
-      "command": ["python3", "refresh_schedule_assessment.py"],
+      "command": ["uv", "run", "--with-requirements", "requirements-dev.txt", "python", "refresh_capacity.py"],
       "read_only": true,
       "requires_confirmation": false,
-      "expected_output": "A refreshed derived capacity assessment.",
+      "expected_output": "Fresh schema-valid calendar_free_blocks_next14.csv and schedule_capacity.json artifacts, or a closed failure without replacing prior outputs.",
       "duration": "under 2 minutes",
       "interaction": "none"
     },

@@ -258,6 +258,9 @@ class LabConsoleTests(unittest.TestCase):
             self.assertIn("read_only", routine)
             self.assertIn("requires_confirmation", routine)
             self.assertIn("expected_output", routine)
+        self.assertEqual(registry["capacity"]["command"], ["uv", "run", "--with-requirements", "requirements-dev.txt", "python", "refresh_capacity.py"])
+        self.assertTrue(registry["capacity"]["read_only"])
+        self.assertFalse(registry["capacity"]["requires_confirmation"])
 
     def test_open_uses_native_viewer_for_known_target(self):
         with tempfile.TemporaryDirectory() as tmp:
