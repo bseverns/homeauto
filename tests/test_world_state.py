@@ -425,6 +425,11 @@ class WorldStateTests(unittest.TestCase):
         blocked = world_state.interpret(self.opportunity_raw(fit_status="blocked"), studio_registry={"schema_version": "1.0.0", "machines": []})
         self.assertEqual(blocked["opportunities"][0]["state"], "blocked")
 
+        does_not_fit = world_state.interpret(self.opportunity_raw(fit_status="does_not_fit"), studio_registry={"schema_version": "1.0.0", "machines": []})
+        self.assertEqual(does_not_fit["opportunities"][0]["state"], "does_not_fit")
+        fit_reason = next(item for item in does_not_fit["opportunities"][0]["why"] if item["check"] == "capacity_fit")
+        self.assertEqual(fit_reason["result"], "fail")
+
         unknown = self.opportunity_raw()
         unknown["sources"][1]["payload"]["schedule"]["capacity"]["results"] = []
         insufficient = world_state.interpret(unknown, studio_registry={"schema_version": "1.0.0", "machines": []})

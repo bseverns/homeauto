@@ -339,6 +339,9 @@ def derive_opportunities(
         elif capacity.get("fit_status") == "blocked":
             state = "blocked"
             why.append(_why("capacity_fit", "fail", capacity.get("reason") or "Schedule capacity reports an explicit blocker.", [coordination["id"]]))
+        elif capacity.get("fit_status") == "does_not_fit":
+            state = "does_not_fit"
+            why.append(_why("capacity_fit", "fail", capacity.get("reason") or "Schedule capacity reports that this action does not fit.", [coordination["id"]]))
         elif capacity.get("fit_status") != "fits":
             state = "insufficient_information"
             why.append(_why("capacity_fit", "unknown", capacity.get("reason") or "Schedule capacity does not report a compatible fit.", [coordination["id"]]))

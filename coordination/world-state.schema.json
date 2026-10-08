@@ -120,7 +120,7 @@
           "opportunity_id": {"type": "string"},
           "action_id": {"type": "string"},
           "project_id": {"type": ["string", "null"]},
-          "state": {"enum": ["available", "capacity_stale", "runtime_stale", "missing_affordance", "blocked", "insufficient_information", "not_currently_eligible"]},
+          "state": {"enum": ["available", "capacity_stale", "runtime_stale", "missing_affordance", "blocked", "does_not_fit", "insufficient_information", "not_currently_eligible"]},
           "action": {"type": "object"},
           "capacity": {"type": ["object", "null"]},
           "affordances": {
