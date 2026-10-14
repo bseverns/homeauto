@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-10-13T15:00:00+00:00",
+  "contract": {
+    "name": "benlab-actions",
+    "schema_version": "1.2.0",
+    "action_identity_field": "action_id",
+    "calendar_data": false,
+    "prose_inference_allowed": false
+  },
+  "queues": {
+    "now": ["[FIXTURE] Reliability path"],
+    "next": [],
+    "sleeping": [],
+    "background": []
+  },
+  "actions": [
+    {
+      "action_id": "benlab-action:0123456789abcdef:1",
+      "path": "fixtures/benlab/reliability-path.md",
+      "project": "[FIXTURE] Reliability path",
+      "status": "active",
+      "attention": "now",
+      "attention_state": "now",
+      "next_action": "Verify the synthetic cross-repository reliability path",
+      "current_commitment": true,
+      "may_request_time_now": true,
+      "next_action_effort": "30m",
+      "energy_fit": "screen-only",
+      "next_action_stack": ["terminal", "repo"],
+      "next_action_route": "fixture_only",
+      "evidence_status": "fixture",
+      "evidence_blocker": false,
+      "proof_mode": "synthetic fixture proof",
+      "public_safe": true,
+      "ready_for": ["test"]
+    }
+  ],
+  "sleeping": []
+}

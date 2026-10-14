@@ -1,17 +1,17 @@
 # Role-based deployment: Orin + Intel Mac mini
 
-The current server inventory is a **Jetson Orin** and at least one **Intel Mac mini
-with 16 GB RAM**. There is no cluster backplane in this deployment. Services remain
-organized by role so they can move between the two machines without changing their
-network contracts.
+The proposed server inventory is a **Jetson Orin** and at least one **Intel Mac mini
+with 16 GB RAM**. The tracked configuration does not require a cluster backplane.
+Services remain organized by role so they can move between the two machines without
+changing their network contracts.
 
-## Current role assignment
+## Proposed role assignment
 
 | Host | Primary roles | Services |
 | --- | --- | --- |
-| Jetson Orin (`orin-core`) | CORE + VISION | Home Assistant, MQTT, Node-RED, DNS, reverse proxy, Snapserver, camera/ML workloads |
-| Intel Mac mini (`macmini-history`) | HISTORY + printer host | Backups, databases, OctoPrint, archives |
-| Either host | EXPERIMENTS | Local assistant, RAG, OCR, and temporary services |
+| Jetson Orin (`orin-core`) | CORE; proposed VISION host | Configured by `core.yml`: Home Assistant, MQTT, Node-RED, Traefik. Optional `audio.yml`: Snapserver, Mopidy, librespot, vinyl ingest. Camera/ML placement is proposed. |
+| Intel Mac mini (`macmini-history`) | Proposed HISTORY + printer host | Backups, databases, OctoPrint, and archives are proposed; no HISTORY or OctoPrint Compose slice is defined. |
+| Either host | EXPERIMENTS | The local assistant/RAG stack is configured by `assistant.yml`; OCR and other temporary services are proposed. |
 
 Run GPU-dependent experiments on the Orin. Run ordinary x86 containers and
 memory-heavy CPU services on the Mac mini when doing so will not interfere with

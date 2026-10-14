@@ -51,9 +51,13 @@ def freshness(observed_at: str | None, collected_at: str, limit: int) -> dict[st
 
 
 def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    sources = payload.get("sources", {})
-    needs = payload.get("benlab", {}).get("now", [])
-    fits = (payload.get("schedule", {}).get("capacity") or {}).get("fits", [])
+    sources = payload.get("sources") or {}
+    raw_benlab = payload.get("benlab")
+    raw_schedule = payload.get("schedule")
+    benlab = raw_benlab or {}
+    schedule = raw_schedule or {}
+    needs = benlab.get("now", [])
+    fits = (schedule.get("capacity") or {}).get("fits", [])
     summary = {
         "generated_at": payload.get("generated_at"),
         "source_availability": {
@@ -69,9 +73,8 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "capacity_projects": [item.get("project") for item in fits if item.get("temporal_status") == "today"],
     }
-    benlab = payload.get("benlab")
-    capacity = payload.get("schedule", {}).get("capacity")
-    if isinstance(benlab, dict):
+    capacity = schedule.get("capacity")
+    if isinstance(raw_benlab, dict):
         summary["benlab"] = {
             key: benlab.get(key)
             for key in ("generated_at", "artifact_sha256", "contract", "actions")

@@ -1,6 +1,6 @@
 # Orin + Mac mini field card
 
-## Current hosts
+## Proposed hosts
 
 - `orin-core`: CORE + VISION; automation, networking, audio, and GPU work.
 - `macmini-history`: HISTORY + printer host; backups, storage, OctoPrint, and
@@ -53,7 +53,7 @@ and printer configuration.
 
 ## Remember
 
-- The current deployment does not depend on cluster hardware.
+- The configured deployment does not require cluster hardware.
 - Compose slices live in `infra/roles/compose/`.
 - Reserve both host addresses in DHCP and local DNS.
-- Keep CORE stable; experiments can move between the two available hosts.
+- Keep CORE stable; experiments can move between the two proposed hosts once their availability is observed.

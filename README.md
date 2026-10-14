@@ -23,7 +23,7 @@ New to the stack? Grab the short, reliable contracts first, then dive into the l
 - **CORE** = the conductor (role name). Formerly called **ORIN**.  
 - **ORIN** = legacy nickname for the CORE box (still works in env vars).  
 - **NANO‑A** = Frigate/vision edge.  
-- **MAC‑MINI** = an available 16 GB Intel Mac mini (printer host, HISTORY, and optional EXPERIMENTS).
+- **MAC‑MINI** = the proposed 16 GB Intel Mac mini (printer host, HISTORY, and optional EXPERIMENTS).
 - **Rooms** = Snapcast clients (Studio downstairs, Dining, Studio upstairs).  
 - **Your Router/Firewall** = your own downstream router; C4000XG is in Transparent Bridge.
 
@@ -33,6 +33,11 @@ You’ll customize IPs, names, and ports below.
 
 ## Role-based language (new, additive, reversible)
 
+**Evidence states:** **proposed** means intended placement; **configured** means
+represented in tracked configuration; **observed** means reported by live-host
+telemetry; **verified** means a live observation passed its stated check.
+Fixture-backed tests verify code paths, not this deployment.
+
 Hardware is interchangeable; **roles** are not. From here on out:
 
 - **CORE** is the role that used to be called **ORIN**.
@@ -41,12 +46,13 @@ Hardware is interchangeable; **roles** are not. From here on out:
 
 This keeps the stack stable while you move hardware around like a synth rack.
 
-### Current equipment assignment
+### Proposed equipment assignment
 
-There is no cluster chassis in the current inventory. The **Jetson Orin** owns CORE
-and is the preferred VISION/GPU host. At least one **16 GB Intel Mac mini** is
-available for HISTORY, OctoPrint, backups, and CPU-friendly EXPERIMENTS. See the
-[deployment guide](./docs/ROLE_BASED_DEPLOYMENT.md) for the operational split.
+The configured target assigns CORE to a **Jetson Orin** and proposes it for
+VISION/GPU work. A **16 GB Intel Mac mini** is proposed for HISTORY, OctoPrint,
+backups, and CPU-friendly EXPERIMENTS. This repository does not contain a live
+observation verifying either host assignment. See the
+[deployment guide](./docs/ROLE_BASED_DEPLOYMENT.md) for the proposed split.
 
 ---
 
@@ -406,7 +412,11 @@ docker exec -it tailscale \
 
 ### Tailscale ACL snippet
 
-The repo now ships [`tailscale-acl.example.json`](./tailscale-acl.example.json). Drop it into the Tailscale admin console’s ACL editor, swap hostnames/IPs for your world, and commit. It captures the same intent as before—admin boxes can SSH/HA/Snapweb, display panels only get HA, automation boxes get MQTT.
+The repo ships [`tailscale-acl.example.json`](./tailscale-acl.example.json) as an
+intent sketch, not a verified paste-ready tailnet policy. Merge its `acls` entries
+into your existing policy, define the referenced groups, tags, and host aliases,
+configure global DNS in Tailscale's DNS settings, and validate the result before
+committing it.
 
 - Tag every box that should reach CORE (`tailscale tag set admin orin-core`).
 - Use tailnet DNS → Pi-hole so remote devices resolve your LAN hostnames without leaking queries.

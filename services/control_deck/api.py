@@ -304,6 +304,9 @@ def build_server(
             if path in routes:
                 self._send_json(200, routes[path](), head)
                 return
+            if path.startswith("/api/"):
+                self._send_json(404, {"error": "not_found"}, head)
+                return
             if root is not None:
                 relative = "index.html" if path == "/" else path.lstrip("/")
                 candidate = (root / relative).resolve()

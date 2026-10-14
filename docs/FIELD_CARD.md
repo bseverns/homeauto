@@ -29,24 +29,15 @@ Run these right after you boot the stack. If these fail, stop and fix before you
 | Snapserver stream | 1704 | TCP | Snapcast audio stream ingress. |
 | Pi-hole admin | 80 | HTTP | `http://$ORIN_IP/admin`. |
 | Unbound | 5335 | TCP/UDP | DNS upstream for Pi-hole. |
-| OctoFarm | 4000 | HTTP | Printer fleet dashboard (points at the 16 GB Intel Mac mini printer host). |
+| OctoFarm | 4000 | HTTP | Printer fleet dashboard; connection to the proposed Mac mini printer host is not live-verified here. |
 | Portainer | 9000 / 9443 | HTTP/HTTPS | Container UI. |
 
-## Topology in 6 lines (text mode for field ops)
-- **ORIN** = the conductor (DNS + automation + audio brain).
-- **MAC‑MINI A1347** = main printer host (OctoPrint + USB lifeline).
-- **OctoFarm** lives on ORIN, points at the Mac Mini + any OctoPi/Klipper nodes.
-- **OctoPi/Klipper** = printer‑specific edges (only where needed).
-- **Snapclients** = per‑room audio endpoints.
-- **Router** hands out ORIN as DNS so everything resolves locally.
-
-## Printer host reality check (aka: where the plastic actually melts)
-The **16 GB Intel Mac mini** is the main printer server now. That means:
-- **OctoPrint lives on the Mac Mini**, not on a Jetson edge.
-- **OctoFarm on ORIN talks to the Mac Mini** (and any OctoPi/Klipper sidecars).
-- If prints stall, start troubleshooting on the Mac Mini first — it’s the heartbeat for the printer fleet.
-
-This isn’t a theoretical diagram thing; it’s the real wiring. Keep it honest so future-you doesn’t spelunk in the wrong box at 2 a.m.
+## Host map: configured services and proposed placement
+- **ORIN** = the proposed conductor host.
+- **MAC‑MINI A1347** = the proposed printer host.
+- **OctoFarm** is configured in the top-level Compose stack; placement on ORIN is proposed.
+- **OctoPrint on the Mac mini** and its OctoFarm connections are proposed and must be verified on the live hosts.
+- **OctoPi/Klipper** nodes are optional proposed edges.
 
 ## Printer field kit — bootstrapping OctoFarm + OctoPrint like you mean it
 This is the practical, punchy starter kit to get the **Intel Mac mini + OctoFarm + OctoPrint** workflow alive.
@@ -71,7 +62,7 @@ If you’re unsure what method to install, choose the one you can update without
   - **URL:** `http://macmini-printers.local:5000` (or the real port for that printer).
   - **API Key:** generate in OctoPrint (`Settings → API`) and paste into OctoFarm.
 
-If you also run OctoPi/Klipper nodes, add them after the Mac Mini hosts so your “main printer host” stays the center of gravity.
+If you also run OctoPi/Klipper nodes, add them after the proposed Mac mini hosts so the intended printer host stays the center of gravity.
 
 ### 3) MQTT wiring (so automations can read the room)
 **Intent:** make printer states visible to HA + Node-RED without babysitting dashboards.
