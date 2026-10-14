@@ -402,6 +402,58 @@ class WorldStateTests(unittest.TestCase):
         self.assertEqual(opportunity["state"], "insufficient_information")
         self.assertIsNone(opportunity["capacity"])
 
+    def test_stale_coordination_envelope_cannot_produce_available_opportunity(self):
+        raw = self.opportunity_raw()
+        raw["sources"][1]["observed_at"] = "2026-09-10T14:00:00+00:00"
+
+        state = world_state.interpret(
+            raw, studio_registry={"schema_version": "1.0.0", "machines": []}
+        )
+        opportunity = state["opportunities"][0]
+
+        self.assertEqual(opportunity["state"], "insufficient_information")
+        check = next(item for item in opportunity["why"] if item["check"] == "coordination_freshness")
+        self.assertEqual(check["result"], "fail")
+
+    def test_capacity_result_freshness_cannot_contradict_available_state(self):
+        raw = self.opportunity_raw()
+        raw["sources"][1]["payload"]["schedule"]["capacity"]["results"][0]["source_freshness"] = "stale"
+
+        opportunity = world_state.interpret(
+            raw, studio_registry={"schema_version": "1.0.0", "machines": []}
+        )["opportunities"][0]
+
+        self.assertEqual(opportunity["state"], "capacity_stale")
+        check = next(item for item in opportunity["why"] if item["check"] == "capacity_freshness")
+        self.assertIn("result", check["detail"].lower())
+
+    def test_expired_or_future_capacity_window_is_not_available(self):
+        registry = {"schema_version": "1.0.0", "machines": []}
+        expired = self.opportunity_raw()
+        expired_result = expired["sources"][1]["payload"]["schedule"]["capacity"]["results"][0]
+        expired_result["capacity_start"] = "2026-09-10T14:00:00+00:00"
+        expired_result["capacity_end"] = "2026-09-10T14:30:00+00:00"
+        expired_opportunity = world_state.interpret(expired, studio_registry=registry)["opportunities"][0]
+        self.assertEqual(expired_opportunity["state"], "capacity_stale")
+
+        future = self.opportunity_raw()
+        future["sources"][1]["payload"]["schedule"]["capacity"]["results"][0]["capacity_start"] = "2026-09-10T16:00:00+00:00"
+        future["sources"][1]["payload"]["schedule"]["capacity"]["results"][0]["capacity_end"] = "2026-09-10T16:30:00+00:00"
+        future_opportunity = world_state.interpret(future, studio_registry=registry)["opportunities"][0]
+        self.assertEqual(future_opportunity["state"], "insufficient_information")
+
+    def test_capacity_must_be_bound_to_current_benlab_artifact(self):
+        raw = self.opportunity_raw()
+        raw["sources"][1]["payload"]["schedule"]["capacity"]["inputs"]["benlab_artifact_sha256"] = "different-benlab-sha"
+
+        opportunity = world_state.interpret(
+            raw, studio_registry={"schema_version": "1.0.0", "machines": []}
+        )["opportunities"][0]
+
+        self.assertEqual(opportunity["state"], "insufficient_information")
+        check = next(item for item in opportunity["why"] if item["check"] == "capacity_binding")
+        self.assertEqual(check["result"], "fail")
+
     def test_opportunity_states_materially_follow_capacity_runtime_and_eligibility(self):
         stale = world_state.interpret(self.opportunity_raw(capacity_status="stale", fit_status="capacity_unknown"), studio_registry={"schema_version": "1.0.0", "machines": []})
         self.assertEqual(stale["opportunities"][0]["state"], "capacity_stale")

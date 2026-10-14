@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python 3.11 contracts and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      - name: Install locked dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+
+      - name: Validate schemas and fixtures
+        run: |
+          python -m unittest \
+            tests.test_world_state.WorldStateTests.test_curated_registry_selects_only_studio_machines \
+            tests.test_world_state.WorldStateTests.test_raw_and_interpreted_documents_validate_against_published_schemas \
+            tests.test_control_deck_api.ControlDeckDataTests.test_valid_world_state_is_validated_and_sanitized \
+            -v
+
+      - name: Run Python test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install "pip-audit>=2,<3"
+          python -m pip_audit --requirement requirements-dev.lock
+
+  web:
+    name: Node 20 frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/control_deck/web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: services/control_deck/web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=low

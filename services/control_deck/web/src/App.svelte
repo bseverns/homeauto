@@ -1,21 +1,25 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { evidenceAnchor, explicitState, sourceMessage, type WorldState } from './model'
+  import { createWorldStateRefresh, evidenceAnchor, explicitState, sourceMessage, type WorldState } from './model'
 
   let world: WorldState | null = null
   let error = ''
   let loading = true
+  let refreshing = false
 
-  onMount(async () => {
-    try {
-      const response = await fetch('/api/v1/world-state', { headers: { Accept: 'application/json' } })
-      if (!response.ok) throw new Error(`API returned ${response.status}`)
-      world = await response.json()
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Unknown API error'
-    } finally {
-      loading = false
-    }
+  const refreshController = createWorldStateRefresh({
+    fetcher: () => fetch('/api/v1/world-state', { headers: { Accept: 'application/json' } }),
+    onUpdate: (state) => {
+      world = state.world
+      error = state.error
+      loading = state.loading
+      refreshing = state.refreshing
+    },
+  })
+
+  onMount(() => {
+    void refreshController.start()
+    return () => refreshController.stop()
   })
 
   const text = (value: unknown) => typeof value === 'string' ? value : ''
@@ -36,6 +40,7 @@
       <p class="lede">A quiet view of what is known, what is possible, and what remains uncertain.</p>
     </div>
     {#if world}
+      <div class="source-tools">
       <div class:warning={world.source.freshness !== 'current'} class="source-badge">
         <span class="signal"></span>
         <div>
@@ -43,17 +48,27 @@
           <small>{sourceMessage(world.source)}</small>
         </div>
       </div>
+      <button class="refresh" disabled={refreshing} on:click={() => refreshController.refresh()}>
+        {refreshing ? 'Refreshing…' : 'Refresh state'}
+      </button>
+      </div>
     {/if}
   </header>
 
   {#if loading}
     <section class="notice" aria-live="polite">Reading deterministic coordination state…</section>
-  {:else if error}
+  {:else if error && !world}
     <section class="notice error" role="alert">
       <strong>Control Deck unavailable</strong>
       <span>{error}. No state has been inferred.</span>
     </section>
   {:else if world}
+    {#if error}
+      <section class="notice error" role="alert">
+        <strong>Refresh failed</strong>
+        <span>{error}. Showing the last successful snapshot; no replacement state was inferred.</span>
+      </section>
+    {/if}
     <section class="summary" aria-label="Snapshot summary">
       <div><span>{world.opportunities.length}</span><small>opportunities</small></div>
       <div><span>{world.machines.length}</span><small>machines</small></div>
@@ -230,7 +245,11 @@
   .eyebrow { margin-bottom: .65rem; color: #74bd9c; font-size: .68rem; font-weight: 800; letter-spacing: .2em; }
   .lede { max-width: 44rem; color: #aebdb6; font-size: 1.05rem; }
   .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; min-height: 15rem; padding-bottom: 2rem; border-bottom: 1px solid #34433d; }
-  .source-badge { display: flex; gap: .75rem; width: min(25rem, 100%); padding: 1rem; border: 1px solid #39634f; background: #14231d; }
+  .source-tools { display: grid; gap: .65rem; width: min(25rem, 100%); }
+  .source-badge { display: flex; gap: .75rem; width: 100%; padding: 1rem; border: 1px solid #39634f; background: #14231d; }
+  .refresh { justify-self: end; padding: .55rem .8rem; border: 1px solid #587066; color: #e9efeb; background: #17201d; font: inherit; font-size: .78rem; cursor: pointer; }
+  .refresh:hover:not(:disabled) { border-color: #74bd9c; background: #203129; }
+  .refresh:disabled { cursor: wait; opacity: .65; }
   .source-badge.warning { border-color: #a97c45; background: #282015; }
   .source-badge .signal { flex: 0 0 auto; width: .7rem; height: .7rem; margin-top: .3rem; border-radius: 50%; background: #74d5a9; box-shadow: 0 0 1rem #74d5a9; }
   .source-badge.warning .signal { background: #e3a85d; box-shadow: 0 0 1rem #e3a85d; }

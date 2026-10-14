@@ -83,3 +83,61 @@ export function evidenceAnchor(id: string): string {
   const safe = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   return `evidence-${safe || 'unknown'}`
 }
+
+export interface RefreshState {
+  world: WorldState | null
+  error: string
+  loading: boolean
+  refreshing: boolean
+}
+
+interface FetchResponse {
+  ok: boolean
+  status?: number
+  json: () => Promise<WorldState>
+}
+
+export interface WorldStateRefreshOptions {
+  fetcher: () => Promise<FetchResponse>
+  onUpdate: (state: RefreshState) => void
+  schedule?: (callback: () => void, intervalMs: number) => unknown
+  cancel?: (timer: unknown) => void
+  intervalMs?: number
+}
+
+export function createWorldStateRefresh(options: WorldStateRefreshOptions) {
+  let world: WorldState | null = null
+  let timer: unknown = null
+  const schedule = options.schedule ?? ((callback, intervalMs) => window.setInterval(callback, intervalMs))
+  const cancel = options.cancel ?? ((handle) => window.clearInterval(handle as number))
+  const intervalMs = options.intervalMs ?? 60_000
+
+  const update = (error: string, loading: boolean, refreshing: boolean) => {
+    options.onUpdate({ world, error, loading, refreshing })
+  }
+
+  const refresh = async () => {
+    update('', world === null, world !== null)
+    try {
+      const response = await options.fetcher()
+      if (!response.ok) throw new Error(`API returned ${response.status ?? 'an error'}`)
+      world = await response.json()
+      update('', false, false)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Unknown API error'
+      update(message, false, false)
+    }
+  }
+
+  return {
+    async start() {
+      await refresh()
+      timer = schedule(() => { void refresh() }, intervalMs)
+    },
+    refresh,
+    stop() {
+      if (timer !== null) cancel(timer)
+      timer = null
+    },
+  }
+}

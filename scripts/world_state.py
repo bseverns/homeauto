@@ -276,8 +276,17 @@ def derive_opportunities(
                 "state": machine.get("readiness", "unknown"),
             })
 
+    coordination_freshness = (coordination.get("freshness") or {}).get("status", "unknown")
     semantic_freshness = freshness(benlab.get("generated_at"), collected_at, BENLAB_FRESHNESS_SECONDS)
     capacity_freshness = (capacity_document.get("freshness") or {}).get("status", "unknown")
+    expected_benlab_sha = benlab.get("artifact_sha256")
+    capacity_benlab_sha = (capacity_document.get("inputs") or {}).get("benlab_artifact_sha256")
+    capacity_bound_to_benlab = bool(
+        expected_benlab_sha
+        and capacity_benlab_sha
+        and expected_benlab_sha == capacity_benlab_sha
+    )
+    collected_time = parse_time(collected_at)
     opportunities = []
     for source_action in actions:
         capacity = capacity_for(source_action)
@@ -325,17 +334,25 @@ def derive_opportunities(
         why = [
             _why("benlab_eligibility", "pass" if eligible else "fail", "BenLab permits this current adopted action to request time." if eligible else "BenLab does not currently permit this action to request time.", [coordination["id"]]),
         ]
+        capacity_start = parse_time((capacity or {}).get("capacity_start"))
+        capacity_end = parse_time((capacity or {}).get("capacity_end"))
         if not eligible:
             state = "not_currently_eligible"
+        elif coordination_freshness != "fresh":
+            state = "insufficient_information"
+            why.append(_why("coordination_freshness", "fail", "The coordination snapshot is stale or undated.", [coordination["id"]]))
         elif semantic_freshness["status"] != "fresh":
             state = "insufficient_information"
             why.append(_why("semantic_freshness", "unknown", "BenLab semantic state is stale or undated.", [coordination["id"]]))
         elif not capacity:
             state = "insufficient_information"
             why.append(_why("capacity_fit", "unknown", "No schedule-capacity result exists for this action.", [coordination["id"]]))
-        elif capacity_freshness != "fresh":
+        elif not capacity_bound_to_benlab:
+            state = "insufficient_information"
+            why.append(_why("capacity_binding", "fail", "Schedule capacity is not bound to the current BenLab artifact.", [coordination["id"]]))
+        elif capacity_freshness != "fresh" or capacity.get("source_freshness") != "fresh":
             state = "capacity_stale"
-            why.append(_why("capacity_freshness", "fail", "Schedule capacity evidence is not fresh.", [coordination["id"]]))
+            why.append(_why("capacity_freshness", "fail", "Schedule capacity document or result evidence is not fresh.", [coordination["id"]]))
         elif capacity.get("fit_status") == "blocked":
             state = "blocked"
             why.append(_why("capacity_fit", "fail", capacity.get("reason") or "Schedule capacity reports an explicit blocker.", [coordination["id"]]))
@@ -345,6 +362,15 @@ def derive_opportunities(
         elif capacity.get("fit_status") != "fits":
             state = "insufficient_information"
             why.append(_why("capacity_fit", "unknown", capacity.get("reason") or "Schedule capacity does not report a compatible fit.", [coordination["id"]]))
+        elif not collected_time or not capacity_start or not capacity_end or capacity_start >= capacity_end:
+            state = "insufficient_information"
+            why.append(_why("capacity_window", "unknown", "Schedule capacity has no valid bounded time window.", [coordination["id"]]))
+        elif collected_time >= capacity_end:
+            state = "capacity_stale"
+            why.append(_why("capacity_window", "fail", "The reported capacity window has expired.", [coordination["id"]]))
+        elif collected_time < capacity_start:
+            state = "insufficient_information"
+            why.append(_why("capacity_window", "unknown", "The reported capacity window has not started.", [coordination["id"]]))
         elif not required:
             state = "insufficient_information"
             why.append(_why("runtime_affordances", "unknown", "BenLab supplied no required affordance stack.", [coordination["id"]]))
