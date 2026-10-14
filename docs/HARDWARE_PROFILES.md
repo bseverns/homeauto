@@ -2,17 +2,17 @@
 
 This stack is role-first: **CORE, HISTORY, VISION, EXPERIMENTS** are jobs, not machines. You can swap hardware under them without rewriting the whole world.
 
-Use this as the current deployment map. The repo assumes the Orin and at least one
-16 GB Intel Mac mini are available; it does not assume a cluster chassis.
+Use this as the proposed deployment map. The configuration targets an Orin and at
+least one 16 GB Intel Mac mini; it does not require a cluster chassis.
 
 ## Roles (what they do)
 
-- **CORE** — the conductor. Home Assistant, MQTT, Node-RED, DNS, reverse proxy, Snapserver. The one box that has to be boring and always-on.
+- **CORE** — the conductor. Home Assistant, MQTT, Node-RED, and reverse proxy. DNS remains in the top-level Compose stack; Snapserver is configured by the optional audio slice.
 - **HISTORY** — long-term logging and storage (InfluxDB, Timescale, MariaDB, backups, camera archive).
 - **VISION** — heavy video or ML workloads (Frigate, object detection, NVR stuff).
 - **EXPERIMENTS** — optional side quests: LLMs, RAG, OCR, custom automations.
 
-## Current hardware mapping
+## Proposed hardware mapping
 
 | Hardware | Suggested role(s) | Why this fits |
 | --- | --- | --- |

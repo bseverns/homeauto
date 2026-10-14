@@ -193,6 +193,30 @@ class ControlDeckHttpTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_unknown_api_route_is_not_spa_fallback(self):
+        data = ControlDeckData(
+            source_path=Path("/definitely/missing/world-state.json"),
+            schema_path=SCHEMA,
+            fallback_path=FIXTURE,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            static_dir = Path(temporary)
+            (static_dir / "index.html").write_text("<main>control deck</main>", encoding="utf-8")
+            server = build_server("127.0.0.1", 0, data, static_dir=static_dir)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(
+                        f"http://127.0.0.1:{server.server_port}/api/not-a-route"
+                    )
+                self.assertEqual(error.exception.code, 404)
+                self.assertEqual(json.load(error.exception), {"error": "not_found"})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

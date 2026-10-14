@@ -1,6 +1,6 @@
 # Control Deck
 
-Phase A is a local, read-only view of deterministic coordination state. It binds only to `127.0.0.1`, validates `coordination/state/world-state.json`, and falls back to a sanitized fixture when that source is missing or invalid.
+Phase A is a local, read-only view of deterministic coordination state. It binds only to `127.0.0.1`, validates `coordination/state/world-state.json`, and falls back to a sanitized fixture when that source is missing or invalid. Fixture-backed tests verify the data path, not a live deployment; fixture responses and the browser view identify themselves as fixture data.
 
 ## Run
 

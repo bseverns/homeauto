@@ -1,0 +1,79 @@
+{
+  "contract": {
+    "name": "schedule-capacity",
+    "schema_version": "1.0.0",
+    "authority": "read_only_capacity_evidence",
+    "generated_at": "2026-10-13T15:00:00+00:00",
+    "prose_inference_allowed": false,
+    "scheduling_authority": false,
+    "calendar_mutation_allowed": false
+  },
+  "inputs": {
+    "benlab_contract_name": "benlab-actions",
+    "benlab_schema_version": "1.2.0",
+    "benlab_generated_at": "2026-10-13T15:00:00+00:00",
+    "benlab_artifact_sha256": "a76236e1045f946c6ad6239b9978c3bc5431fb88c59073ac3820e11b5ecd5370",
+    "capacity_sources": [
+      {
+        "artifact": "calendar_snapshot.json",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "status": "fresh",
+        "generated_at": "2026-10-13T15:00:00+00:00",
+        "window": {
+          "start": "2026-10-13T00:00:00+00:00",
+          "end": "2026-10-14T00:00:00+00:00"
+        },
+        "timezone": "UTC",
+        "warnings": ["SYNTHETIC FIXTURE: not live calendar evidence"]
+      },
+      {
+        "artifact": "calendar_free_blocks_next14.csv",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "status": "fresh",
+        "generated_at": "2026-10-13T15:00:00+00:00",
+        "window": {
+          "start": "2026-10-13T00:00:00+00:00",
+          "end": "2026-10-14T00:00:00+00:00"
+        },
+        "timezone": "UTC",
+        "warnings": ["SYNTHETIC FIXTURE: not live calendar evidence"]
+      }
+    ]
+  },
+  "freshness": {
+    "status": "fresh",
+    "warnings": ["SYNTHETIC FIXTURE: not live capacity evidence"]
+  },
+  "results": [
+    {
+      "action_id": "benlab-action:0123456789abcdef:1",
+      "action_id_origin": "benlab",
+      "project_id": "fixtures/benlab/reliability-path.md",
+      "project": "[FIXTURE] Reliability path",
+      "action": "Verify the synthetic cross-repository reliability path",
+      "attention_state": "now",
+      "queue": "now",
+      "queue_position": 1,
+      "current_commitment": true,
+      "may_request_time_now": true,
+      "fit_status": "fits",
+      "effort": "30m",
+      "energy_fit": "screen-only",
+      "required_stack": ["terminal", "repo"],
+      "route": "fixture_only",
+      "evidence_blocker": false,
+      "proof_mode": "synthetic fixture proof",
+      "source_path": "fixtures/benlab/reliability-path.md",
+      "evidence_provenance": {
+        "kind": "synthetic_fixture"
+      },
+      "reason": "SYNTHETIC FIXTURE: a bounded block fits the declared action",
+      "source_freshness": "fresh",
+      "confidence": "high",
+      "warnings": ["SYNTHETIC FIXTURE: not a live opportunity"],
+      "capacity_block_id": "fixture:block:1",
+      "capacity_start": "2026-10-13T14:30:00+00:00",
+      "capacity_end": "2026-10-13T15:30:00+00:00"
+    }
+  ]
+}
