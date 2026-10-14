@@ -1,0 +1,46 @@
+{
+  "contract": {
+    "name": "homeauto-world-state",
+    "schema_version": "1.1.0",
+    "authority": "read-only; no control actions"
+  },
+  "generated_at": "1970-01-01T00:00:00+00:00",
+  "opportunity_contract": {
+    "name": "lab-opportunities",
+    "schema_version": "1.0.0",
+    "authority": "derived_operator_state",
+    "prose_inference_allowed": false
+  },
+  "inputs": {
+    "benlab": {},
+    "schedule": {},
+    "world_state": {}
+  },
+  "observations": [],
+  "machines": [
+    {
+      "id": "studio-machine:fixture",
+      "label": "Fixture machine",
+      "docs_ref": null,
+      "scope": "studio",
+      "dashboard": true,
+      "lifecycle": "unknown",
+      "capabilities": [],
+      "readiness": "unavailable",
+      "runtime": "no telemetry",
+      "freshness": "unavailable",
+      "affordances": [],
+      "affordance_scope": "studio",
+      "evidence": [],
+      "why": ["sanitized fixture; authoritative world state unavailable"]
+    }
+  ],
+  "capabilities": [],
+  "opportunities": [],
+  "situations": [],
+  "transitions": [],
+  "boundaries": [
+    "Fixture data only.",
+    "No control actions."
+  ]
+}
