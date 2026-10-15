@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simulated-action-approval.schema.json",
+  "title": "Phase C0 stored approval binding",
+  "type": "object",
+  "required": [
+    "approval_id",
+    "request_id",
+    "operator_id",
+    "action_id",
+    "target_id",
+    "expected_prior_state",
+    "desired_state",
+    "evidence_id",
+    "evidence_version",
+    "issued_at",
+    "expires_at",
+    "consumed"
+  ],
+  "properties": {
+    "approval_id": {"type": "string", "pattern": "^approval:[0-9a-f]{32}$"},
+    "request_id": {"type": "string"},
+    "operator_id": {"type": "string", "minLength": 1},
+    "action_id": {"const": "indicator.set"},
+    "target_id": {"const": "fixture:indicator-01"},
+    "expected_prior_state": {"enum": ["on", "off"]},
+    "desired_state": {"enum": ["on", "off"]},
+    "evidence_id": {"type": "string", "minLength": 1},
+    "evidence_version": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "consumed": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}
