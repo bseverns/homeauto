@@ -188,6 +188,15 @@ class ControlDeckHttpTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(request)
             self.assertEqual(error.exception.code, 405)
+
+            execute = f"{base}/api/v1/execute"
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(execute)
+            self.assertEqual(error.exception.code, 404)
+            request = urllib.request.Request(execute, method="POST", data=b"{}")
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request)
+            self.assertEqual(error.exception.code, 405)
         finally:
             server.shutdown()
             server.server_close()

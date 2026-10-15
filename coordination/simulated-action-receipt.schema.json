@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simulated-action-receipt.schema.json",
+  "title": "Phase C0 durable simulated action receipt",
+  "type": "object",
+  "required": [
+    "request_id",
+    "idempotency_key",
+    "operator_id",
+    "request",
+    "outcome",
+    "dispatch_possible",
+    "simulation",
+    "verification_kind",
+    "physically_verified",
+    "events"
+  ],
+  "properties": {
+    "request_id": {"type": "string"},
+    "idempotency_key": {"type": "string"},
+    "operator_id": {"type": "string", "minLength": 1},
+    "request": {"$ref": "simulated-action-request.schema.json"},
+    "outcome": {
+      "enum": ["rejected", "verified", "contradicted", "timed_out_ambiguous"]
+    },
+    "dispatch_possible": {"type": "boolean"},
+    "simulation": {"const": true},
+    "verification_kind": {
+      "oneOf": [
+        {"const": "simulated_platform_readback"},
+        {"type": "null"}
+      ]
+    },
+    "physically_verified": {"const": false},
+    "events": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["sequence", "state", "recorded_at", "detail"],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1},
+          "state": {
+            "enum": [
+              "pending",
+              "authorized",
+              "dispatched",
+              "observed",
+              "rejected",
+              "verified",
+              "contradicted",
+              "timed_out_ambiguous"
+            ]
+          },
+          "recorded_at": {"type": "string", "format": "date-time"},
+          "detail": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

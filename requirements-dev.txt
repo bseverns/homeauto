@@ -1,1 +1,2 @@
 jsonschema>=4,<5
+pyobjc-framework-LocalAuthentication>=12,<13; sys_platform == "darwin"
