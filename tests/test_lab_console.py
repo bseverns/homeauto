@@ -3,6 +3,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -134,7 +135,9 @@ class LabConsoleTests(unittest.TestCase):
             }
             path.write_text(json.dumps(payload))
 
-            summary = lab_console.summarize_capacity(path)
+            summary = lab_console.summarize_capacity(
+                path, now=datetime.fromisoformat("2026-09-20T12:00:00+00:00")
+            )
 
             self.assertEqual(summary["result_count"], 2)
             self.assertEqual(summary["fit_count"], 1)
@@ -146,6 +149,151 @@ class LabConsoleTests(unittest.TestCase):
             self.assertEqual(summary["inputs"]["benlab_artifact_sha256"], "a" * 64)
             self.assertEqual(summary["contract"]["generated_at"], "2026-09-20T00:00:00+00:00")
             self.assertEqual(summary["artifact_sha256"], lab_console.sha256_file(path))
+
+            expired = lab_console.summarize_capacity(
+                path, now=datetime.fromisoformat("2026-09-22T00:00:00+00:00")
+            )
+            self.assertEqual(expired["freshness"]["status"], "stale")
+            self.assertEqual(expired["results"][0]["source_freshness"], "stale")
+            self.assertEqual(expired["fits"][0]["temporal_status"], "stale")
+
+    def test_schedule_capacity_with_unknown_window_end_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "schedule_capacity.json"
+            sources = self.capacity_sources()
+            sources[0]["window"]["end"] = None
+            path.write_text(json.dumps({
+                "contract": {
+                    "name": "schedule-capacity", "schema_version": "1.0.0",
+                    "authority": "read_only_capacity_evidence", "scheduling_authority": False,
+                    "calendar_mutation_allowed": False, "prose_inference_allowed": False,
+                    "generated_at": "2026-09-20T00:00:00+00:00",
+                },
+                "inputs": {
+                    "benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0",
+                    "benlab_generated_at": "2026-09-20T00:00:00+00:00",
+                    "benlab_artifact_sha256": "a" * 64,
+                    "capacity_sources": sources,
+                },
+                "freshness": {"status": "fresh", "warnings": []},
+                "results": [],
+            }))
+
+            summary = lab_console.summarize_capacity(
+                path, now=datetime.fromisoformat("2026-09-20T12:00:00+00:00")
+            )
+
+            self.assertEqual(summary["freshness"]["status"], "unknown")
+            self.assertIn("window end is unknown", summary["freshness"]["warnings"][0])
+
+    def test_schedule_capacity_naive_window_end_uses_declared_timezone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "schedule_capacity.json"
+            sources = self.capacity_sources()
+            for source in sources:
+                source["window"]["end"] = "2026-09-21T00:00:00"
+            payload = {
+                "contract": {
+                    "name": "schedule-capacity", "schema_version": "1.0.0",
+                    "authority": "read_only_capacity_evidence", "scheduling_authority": False,
+                    "calendar_mutation_allowed": False, "prose_inference_allowed": False,
+                    "generated_at": "2026-09-20T00:00:00+00:00",
+                },
+                "inputs": {
+                    "benlab_contract_name": "benlab-actions", "benlab_schema_version": "1.2.0",
+                    "benlab_generated_at": "2026-09-20T00:00:00+00:00",
+                    "benlab_artifact_sha256": "a" * 64,
+                    "capacity_sources": sources,
+                },
+                "freshness": {"status": "fresh", "warnings": []},
+                "results": [],
+            }
+            path.write_text(json.dumps(payload))
+
+            summary = lab_console.summarize_capacity(
+                path, now=datetime.fromisoformat("2026-09-22T00:00:00+00:00")
+            )
+
+            self.assertEqual(summary["freshness"]["status"], "stale")
+
+            for source in sources:
+                source["window"]["end"] = "2026-09-23T00:00:00+00:00"
+                source["timezone"] = None
+            path.write_text(json.dumps(payload))
+
+            summary = lab_console.summarize_capacity(
+                path, now=datetime.fromisoformat("2026-09-22T00:00:00+00:00")
+            )
+
+            self.assertEqual(summary["freshness"]["status"], "unknown")
+
+    def test_labguard_summary_is_sanitized_and_expires(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "security-summary.json"
+            payload = {
+                "contract": {
+                    "name": "labguard-security-summary",
+                    "schema_version": "0.1.0",
+                    "authority": "read-only projection; no control actions",
+                },
+                "generated_at": "2026-09-20T00:00:00Z",
+                "device_id": "mac-mini-m1-01",
+                "source": {"kind": "security_drift", "authority": "labguard", "state": "observed"},
+                "assessment": {
+                    "status": "changes_observed", "review_required": True,
+                    "finding_count": 2, "review_count": 1, "incomplete_comparison": False,
+                },
+                "sensitivity": "internal", "raw_evidence_included": False, "ttl_seconds": 3600,
+            }
+            path.write_text(json.dumps(payload))
+
+            fresh = lab_console.summarize_labguard(
+                path, now=datetime.fromisoformat("2026-09-20T00:30:00+00:00")
+            )
+            stale = lab_console.summarize_labguard(
+                path, now=datetime.fromisoformat("2026-09-20T02:00:00+00:00")
+            )
+
+            self.assertEqual(fresh["freshness"], "fresh")
+            self.assertEqual(stale["freshness"], "stale")
+            self.assertEqual(fresh["assessment"]["finding_count"], 2)
+            self.assertEqual(fresh["sensitivity"], "internal")
+            self.assertEqual(fresh["collected_at"], "2026-09-20T00:30:00+00:00")
+            self.assertNotIn("raw_evidence", fresh)
+            payload["raw_evidence_included"] = True
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "does not conform"):
+                lab_console.summarize_labguard(path)
+
+    def test_labguard_future_timestamp_and_oversized_ttl_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "security-summary.json"
+            payload = {
+                "contract": {
+                    "name": "labguard-security-summary", "schema_version": "0.1.0",
+                    "authority": "read-only projection; no control actions",
+                },
+                "generated_at": "2099-01-01T00:00:00Z",
+                "device_id": "mac-mini-m1-01",
+                "source": {"kind": "security_drift", "authority": "labguard", "state": "observed"},
+                "assessment": {
+                    "status": "no_changes_observed", "review_required": False,
+                    "finding_count": 0, "review_count": 0, "incomplete_comparison": False,
+                },
+                "sensitivity": "internal", "raw_evidence_included": False, "ttl_seconds": 3600,
+            }
+            path.write_text(json.dumps(payload))
+
+            future = lab_console.summarize_labguard(
+                path, now=datetime.fromisoformat("2026-11-12T00:00:00+00:00")
+            )
+            self.assertEqual(future["freshness"], "stale")
+
+            payload["generated_at"] = "2026-11-12T00:00:00Z"
+            payload["ttl_seconds"] = 3601
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "unsupported LabGuard ttl_seconds"):
+                lab_console.summarize_labguard(path)
 
     def test_schedule_capacity_schema_rejects_missing_capacity_source_provenance(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -649,6 +797,8 @@ class LabConsoleTests(unittest.TestCase):
         self.assertIn("../machine-docs/personal-machines/test-printer/", dashboard)
         self.assertIn("unknown → ready", dashboard)
         self.assertIn("Why?", dashboard)
+        self.assertIn("## Qualitative digest", dashboard)
+        self.assertIn("missing evidence rather than failure", dashboard)
 
     def test_dashboard_leads_with_deterministic_opportunities_and_demotes_research(self):
         dashboard = lab_console.render_dashboard({

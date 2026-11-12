@@ -74,6 +74,7 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "capacity_projects": [item.get("project") for item in fits if item.get("temporal_status") == "today"],
     }
     capacity = schedule.get("capacity")
+    life_inbox = payload.get("life_inbox")
     if isinstance(raw_benlab, dict):
         summary["benlab"] = {
             key: benlab.get(key)
@@ -83,6 +84,11 @@ def _coordination_summary(payload: dict[str, Any]) -> dict[str, Any]:
         summary["capacity"] = {
             key: capacity.get(key)
             for key in ("artifact_sha256", "contract", "inputs", "freshness", "results")
+        }
+    if isinstance(life_inbox, dict):
+        summary["life_inbox"] = {
+            key: life_inbox.get(key)
+            for key in ("contract", "generated_at", "artifact_sha256", "actions")
         }
     return summary
 
@@ -216,6 +222,7 @@ def derive_opportunities(
     benlab = context.get("benlab", {}) if isinstance(context, dict) else {}
     benlab_schema_version = (benlab.get("contract") or {}).get("schema_version")
     capacity_document = context.get("capacity", {}) if isinstance(context, dict) else {}
+    life_inbox_document = context.get("life_inbox", {}) if isinstance(context, dict) else {}
     inputs = {
         "benlab": {
             "contract": benlab.get("contract"),
@@ -228,6 +235,11 @@ def derive_opportunities(
             "generated_at": (capacity_document.get("contract") or {}).get("generated_at"),
         },
         "world_state": {"generated_at": collected_at},
+        "life_inbox": {
+            "contract": life_inbox_document.get("contract"),
+            "artifact_sha256": life_inbox_document.get("artifact_sha256"),
+            "generated_at": life_inbox_document.get("generated_at"),
+        },
     }
     contract = {
         "name": "lab-opportunities",
@@ -416,6 +428,36 @@ def derive_opportunities(
                 {"authority": "homeauto", "source_ids": provider_ids},
             ],
             "warnings": warnings,
+        })
+    for source_action in life_inbox_document.get("actions") or []:
+        action_id = source_action.get("action_id")
+        if not isinstance(action_id, str) or not action_id:
+            continue
+        opportunities.append({
+            "opportunity_id": f"opportunity:{action_id}",
+            "action_id": action_id,
+            "project_id": None,
+            "state": "insufficient_information",
+            "action": {
+                "authority": "Life Inbox",
+                "project": "Personal",
+                "project_id": None,
+                "next_action": source_action.get("summary"),
+                "deadline": source_action.get("deadline"),
+                "status": "approved",
+            },
+            "capacity": None,
+            "affordances": {"required": [], "available": [], "missing": [], "providers": []},
+            "why": [
+                _why("life_inbox_approval", "pass", "Life Inbox exported this human-approved personal action.", [coordination["id"]]),
+                _why("capacity_authorization", "unknown", "No capacity or execution authorization is supplied by Life Inbox.", [coordination["id"]]),
+            ],
+            "provenance": [{
+                "authority": "Life Inbox",
+                "artifact_sha256": life_inbox_document.get("artifact_sha256"),
+                "contract": life_inbox_document.get("contract"),
+            }],
+            "warnings": ["Requires separate human authorization before scheduling or execution."],
         })
     return {"contract": contract, "inputs": inputs}, opportunities
 
@@ -649,7 +691,7 @@ def interpret(
     return {
         "contract": {
             "name": "homeauto-world-state",
-            "schema_version": "1.1.0",
+            "schema_version": "1.2.0",
             "authority": "read-only; no control actions",
         },
         "generated_at": raw["collected_at"],

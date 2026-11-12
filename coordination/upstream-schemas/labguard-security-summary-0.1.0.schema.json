@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "labguard-security-summary-v0.1.0",
+  "title": "Labguard sanitized security summary (candidate interop contract)",
+  "type": "object",
+  "required": ["contract", "generated_at", "device_id", "source", "assessment", "sensitivity", "raw_evidence_included", "ttl_seconds"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "required": ["name", "schema_version", "authority"],
+      "properties": {
+        "name": {"const": "labguard-security-summary"},
+        "schema_version": {"const": "0.1.0"},
+        "authority": {"const": "read-only projection; no control actions"}
+      }, "additionalProperties": false
+    },
+    "generated_at": {"type": "string", "format": "date-time"},
+    "device_id": {"type": "string", "minLength": 3, "maxLength": 80},
+    "source": {
+      "type": "object",
+      "required": ["kind", "authority", "state"],
+      "properties": {
+        "kind": {"const": "security_drift"},
+        "authority": {"const": "labguard"},
+        "state": {"const": "observed"}
+      }, "additionalProperties": false
+    },
+    "assessment": {
+      "type": "object",
+      "required": ["status", "review_required", "finding_count", "review_count", "incomplete_comparison"],
+      "properties": {
+        "status": {"enum": ["insufficient_evidence", "changes_observed", "no_changes_observed"]},
+        "review_required": {"type": "boolean"},
+        "finding_count": {"type": "integer", "minimum": 0},
+        "review_count": {"type": "integer", "minimum": 0},
+        "incomplete_comparison": {"type": "boolean"}
+      }, "additionalProperties": false
+    },
+    "sensitivity": {"const": "internal"},
+    "raw_evidence_included": {"const": false},
+    "ttl_seconds": {"type": "integer", "minimum": 1}
+  }, "additionalProperties": false
+}

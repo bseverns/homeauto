@@ -10,7 +10,7 @@
       "required": ["name", "schema_version", "authority"],
       "properties": {
         "name": {"const": "homeauto-world-state"},
-        "schema_version": {"const": "1.1.0"},
+        "schema_version": {"const": "1.2.0"},
         "authority": {"const": "read-only; no control actions"}
       }
     },
@@ -28,11 +28,12 @@
     },
     "inputs": {
       "type": "object",
-      "required": ["benlab", "schedule", "world_state"],
+      "required": ["benlab", "schedule", "world_state", "life_inbox"],
       "properties": {
         "benlab": {"type": "object"},
         "schedule": {"type": "object"},
-        "world_state": {"type": "object"}
+        "world_state": {"type": "object"},
+        "life_inbox": {"type": "object"}
       },
       "additionalProperties": false
     },

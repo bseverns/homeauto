@@ -347,7 +347,7 @@ class WorldStateTests(unittest.TestCase):
     def test_first_class_opportunity_preserves_authority_identity_and_explanation(self):
         state = world_state.interpret(self.opportunity_raw(), studio_registry={"schema_version": "1.0.0", "machines": []})
 
-        self.assertEqual(state["contract"]["schema_version"], "1.1.0")
+        self.assertEqual(state["contract"]["schema_version"], "1.2.0")
         opportunity = state["opportunities"][0]
         self.assertEqual(opportunity["opportunity_id"], "opportunity:benlab:homeauto")
         self.assertEqual(opportunity["action_id"], "benlab:homeauto")

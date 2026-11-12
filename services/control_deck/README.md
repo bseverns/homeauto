@@ -10,10 +10,11 @@ npm install
 npm run build
 cd ../../..
 env -u VIRTUAL_ENV uv run --isolated --with-requirements requirements.txt \
-  python -m services.control_deck.api
+  python -m services.control_deck.api --port 8765
 ```
 
 Open <http://127.0.0.1:8765>. Stop the server with `Ctrl-C`.
+If another local tool owns that port, choose another loopback port with `--port`, for example `--port 8766`.
 
 ## Verify
 

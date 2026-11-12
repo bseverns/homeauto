@@ -9,9 +9,19 @@
       "path": "../benlab-local-analyst/data/analyst-promotions.json",
       "authority": "The Analyst supplies non-binding research candidates only."
     },
+    "life_inbox": {
+      "path": "../../../life-inbox/state/homeauto-actions.json",
+      "optional": true,
+      "authority": "Life Inbox supplies human-approved personal summaries with no scheduling or execution authority."
+    },
     "schedule_capacity": {
       "path": "../schedule-assessment/schedule_capacity.json",
       "authority": "schedule-assessment supplies read-only capacity fit, not calendar commitments."
+    },
+    "labguard_security": {
+      "path": "~/.local/state/labguard/security-summary.json",
+      "optional": true,
+      "authority": "LabGuard supplies sanitized read-only security drift observations; raw evidence and control remain in LabGuard."
     }
   },
   "outputs": {

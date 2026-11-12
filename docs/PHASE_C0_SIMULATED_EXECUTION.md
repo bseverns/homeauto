@@ -15,7 +15,7 @@ Phase C0 adds one **separate, disabled-by-default simulation harness**. It does 
 
 The only command is `indicator.set`, target `fixture:indicator-01`, desired state `on` or `off`. An authenticated operator may authorize one exact request only after preview. The approval binds operator, action, target, expected and desired states, evidence identity/version, request identity, idempotency identity, and expiration. Request bodies cannot carry an actor identity.
 
-`homeauto-world-state@1.1.0` remains read-only. BenLab action IDs and homeauto opportunity IDs are references in receipts, not delegated authority. schedule-assessment remains read-only capacity evidence. machine-docs remains physical identity/safety authority; the Phase C0 fixture is not a physical-machine identity.
+`homeauto-world-state@1.2.0` remains read-only. BenLab action IDs and homeauto opportunity IDs are references in receipts, not delegated authority. schedule-assessment remains read-only capacity evidence. machine-docs remains physical identity/safety authority; the Phase C0 fixture is not a physical-machine identity.
 
 ## Sequence and state machine
 

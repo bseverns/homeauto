@@ -16,6 +16,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import jsonschema
 
@@ -28,6 +29,8 @@ ROUTINES_PATH = ROOT / "coordination" / "routines.json"
 ROUTINE_RECEIPTS_DIR = ROOT / "coordination" / "state" / "routine-receipts"
 BENLAB_1_2_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "benlab-actions-1.2.0.schema.json"
 SCHEDULE_CAPACITY_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "schedule-capacity-1.0.0.schema.json"
+LABGUARD_SCHEMA = ROOT / "coordination" / "upstream-schemas" / "labguard-security-summary-0.1.0.schema.json"
+LABGUARD_MAX_TTL_SECONDS = 3600
 TARGETS = ("benlab", "benlab-local-analyst", "schedule-assessment", "homeauto")
 ACTION_TYPES = (
     "review_candidate",
@@ -90,6 +93,40 @@ def source_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
             path.stat().st_mtime, timezone.utc
         ).isoformat()
     return result
+
+
+def summarize_labguard(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
+    payload = read_json(path)
+    try:
+        jsonschema.Draft202012Validator(
+            read_json(LABGUARD_SCHEMA), format_checker=jsonschema.FormatChecker()
+        ).validate(payload)
+    except jsonschema.ValidationError as exc:
+        location = ".".join(str(part) for part in exc.absolute_path) or "document"
+        raise ValueError(
+            f"LabGuard security summary does not conform at {location}: {exc.message}"
+        ) from exc
+    generated = datetime.fromisoformat(payload["generated_at"].replace("Z", "+00:00"))
+    checked = now or datetime.now(timezone.utc)
+    ttl_seconds = payload["ttl_seconds"]
+    if ttl_seconds > LABGUARD_MAX_TTL_SECONDS:
+        raise ValueError(f"unsupported LabGuard ttl_seconds: {ttl_seconds}")
+    return {
+        "contract": payload["contract"],
+        "generated_at": payload["generated_at"],
+        "device_id": payload["device_id"],
+        "source": payload["source"],
+        "assessment": payload["assessment"],
+        "sensitivity": payload["sensitivity"],
+        "collected_at": checked.isoformat(),
+        "source_artifact": str(path),
+        "derivation": "schema-validated sanitized projection with TTL freshness",
+        "freshness": "fresh" if generated.timestamp() <= checked.timestamp() <= generated.timestamp() + ttl_seconds else "stale",
+        "valid_until": datetime.fromtimestamp(
+            generated.timestamp() + ttl_seconds, timezone.utc
+        ).isoformat(),
+        "artifact_sha256": sha256_file(path),
+    }
 
 
 def summarize_benlab(path: Path) -> dict[str, Any]:
@@ -255,7 +292,7 @@ def summarize_analyst(path: Path, limit: int = 8) -> dict[str, Any]:
     }
 
 
-def summarize_capacity(path: Path) -> dict[str, Any]:
+def summarize_capacity(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
     if path.suffix == ".json":
         payload = read_json(path)
         schema = read_json(SCHEDULE_CAPACITY_SCHEMA)
@@ -287,11 +324,50 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
             or (source_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", str(source_hash)))
         ):
             raise ValueError(f"invalid schedule capacity input: {inputs!r}")
-        freshness = payload.get("freshness", {})
-        if freshness.get("status") != "fresh" and any(item.get("fit_status") == "fits" for item in payload.get("results", [])):
+        freshness = dict(payload.get("freshness", {}))
+        results = [dict(item) for item in payload.get("results", []) if isinstance(item, dict)]
+        if freshness.get("status") != "fresh" and any(item.get("fit_status") == "fits" for item in results):
             raise ValueError("schedule capacity contract contains fits without fresh capacity evidence")
+        capacity_sources = inputs["capacity_sources"]
+        window_ends = [source["window"]["end"] for source in capacity_sources]
+        if any(end is None for end in window_ends):
+            valid_until = None
+            freshness["status"] = "unknown"
+            freshness["warnings"] = [
+                *freshness.get("warnings", []), "capacity evidence window end is unknown"
+            ]
+            for item in results:
+                if item.get("source_freshness") == "fresh":
+                    item["source_freshness"] = "unknown"
+        else:
+            try:
+                parsed_ends = []
+                for source, end in zip(capacity_sources, window_ends):
+                    declared_timezone = ZoneInfo(source["timezone"])
+                    parsed = datetime.fromisoformat(end.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=declared_timezone)
+                    parsed_ends.append(parsed)
+                valid_until = min(parsed_ends)
+            except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+                valid_until = None
+                freshness["status"] = "unknown"
+                freshness["warnings"] = [
+                    *freshness.get("warnings", []),
+                    "capacity evidence window end or timezone is invalid",
+                ]
+                for item in results:
+                    if item.get("source_freshness") == "fresh":
+                        item["source_freshness"] = "unknown"
+        if valid_until is not None and (now or datetime.now(timezone.utc)) > valid_until:
+            freshness["status"] = "stale"
+            warning = f"capacity evidence window ended at {valid_until.isoformat()}"
+            freshness["warnings"] = [*freshness.get("warnings", []), warning]
+            for item in results:
+                if item.get("source_freshness") == "fresh":
+                    item["source_freshness"] = "stale"
         fits = []
-        for item in payload.get("results", []):
+        for item in results:
             if item.get("fit_status") != "fits":
                 continue
             fits.append({
@@ -315,7 +391,7 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
             "result_count": len(payload.get("results", [])),
             "fit_count": len(fits),
             "fits": fits,
-            "results": [dict(item) for item in payload.get("results", []) if isinstance(item, dict)],
+            "results": results,
         }
 
     with path.open(encoding="utf-8", newline="") as handle:
@@ -348,6 +424,45 @@ def summarize_capacity(path: Path) -> dict[str, Any]:
     return {
         "fit_count": len(rows),
         "fits": fits,
+    }
+
+
+def summarize_life_inbox(path: Path) -> dict[str, Any]:
+    payload = read_json(path)
+    contract = payload.get("contract", {})
+    if (
+        contract.get("name") != "life-inbox-homeauto-feed"
+        or contract.get("schema_version") != "1.0.0"
+        or contract.get("authority") != "human-approved personal actions"
+        or contract.get("prose_inference_allowed") is not False
+        or contract.get("scheduling_authority") is not False
+        or contract.get("execution_authority") is not False
+        or not valid_datetime(payload.get("generated_at"))
+        or not isinstance(payload.get("actions"), list)
+    ):
+        raise ValueError(f"unsupported Life Inbox feed: {contract!r}")
+    actions = []
+    for action in payload["actions"]:
+        if (
+            not isinstance(action, dict)
+            or set(action) != {"action_id", "summary", "captured_at", "deadline", "status"}
+            or not isinstance(action.get("action_id"), str)
+            or not action["action_id"].startswith("life-inbox:")
+            or not isinstance(action.get("summary"), str)
+            or not action["summary"].strip()
+            or not valid_datetime(action.get("captured_at"))
+            or (action["deadline"] is not None and not valid_datetime(action["deadline"]))
+            or action.get("status") != "approved"
+        ):
+            raise ValueError("unsupported Life Inbox action")
+        actions.append(dict(action))
+    if len({action["action_id"] for action in actions}) != len(actions):
+        raise ValueError("Life Inbox action IDs must be unique")
+    return {
+        "contract": contract,
+        "generated_at": payload["generated_at"],
+        "artifact_sha256": sha256_file(path),
+        "actions": actions,
     }
 
 
@@ -608,16 +723,19 @@ def run_analyst(arguments: list[str], model: str | None, confirmed: bool) -> dic
     )
 
 
-def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+def build_snapshot(config_path: Path = DEFAULT_CONFIG, *, now: datetime | None = None) -> dict[str, Any]:
     config = read_json(config_path)
     specs = config.get("sources", {})
     statuses = {name: source_status(name, spec) for name, spec in specs.items()}
     warnings = []
 
     def load_summary(name: str, loader: Any) -> dict[str, Any] | None:
-        status = statuses.get(name, {})
+        if name not in specs:
+            return None
+        status = statuses[name]
         if not status.get("available"):
-            warnings.append(f"Missing source: {name} ({status.get('configured_path')})")
+            if not specs[name].get("optional"):
+                warnings.append(f"Missing source: {name} ({status.get('configured_path')})")
             return None
         try:
             return loader(resolve_path(specs[name]["path"]))
@@ -630,7 +748,8 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     warnings.extend(directive_errors)
     warnings.extend(receipt_errors)
     benlab = load_summary("benlab_actions", summarize_benlab)
-    capacity = load_summary("schedule_capacity", summarize_capacity)
+    capacity = load_summary("schedule_capacity", lambda path: summarize_capacity(path, now=now))
+    labguard = load_summary("labguard_security", lambda path: summarize_labguard(path, now=now))
     if benlab and capacity:
         capacity_input = capacity.get("inputs", {})
         mismatch = (
@@ -655,6 +774,8 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         "sources": statuses,
         "benlab": benlab,
         "analyst": load_summary("analyst_promotions", summarize_analyst),
+        "labguard": labguard,
+        "life_inbox": load_summary("life_inbox", summarize_life_inbox) if "life_inbox" in specs else None,
         "schedule": {
             "capacity": capacity,
             "freshness": capacity.get("freshness", {}) if capacity else {},
@@ -667,7 +788,9 @@ def build_snapshot(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
             "Analyst candidates are not commitments.",
             "Only BenLab owns attention and project commitment.",
             "Capacity fit is not a scheduled calendar event.",
+            "Life Inbox actions are human-approved personal summaries, not scheduling or execution authorization.",
             "Directives require human confirmation and are not auto-dispatched.",
+            "LabGuard supplies sanitized read-only observations; raw evidence and control remain in LabGuard.",
         ],
     }
     return snapshot
@@ -710,6 +833,16 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
     blocked = [item for item in opportunities if item.get("state") in {"blocked", "missing_affordance"}]
     uncertain = [item for item in opportunities if item.get("state") in {"capacity_stale", "runtime_stale", "insufficient_information", "not_currently_eligible"}]
     recent = [item for item in world_state.get("transitions", []) if str(item.get("situation_id", "")).startswith("opportunity:")][-10:]
+    changes = world_state.get("transitions", [])[-10:]
+    tensions = []
+    if uncertain:
+        tensions.append("Some opportunities depend on stale or incomplete evidence.")
+    if blocked:
+        tensions.append("Some permitted actions lack a presently observed affordance.")
+    if snapshot.get("warnings"):
+        tensions.append("Source warnings limit what this view can responsibly claim.")
+    if snapshot.get("labguard") and snapshot["labguard"].get("freshness") != "fresh":
+        tensions.append("The latest sanitized security observation is stale; absence of a new finding is not evidence of safety.")
     lines = [
         "# BenLab operator dashboard",
         "",
@@ -725,6 +858,28 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         "",
         *(f"- `{cell(item.get('situation_id'))}`: {cell(item.get('from'))} → {cell(item.get('to'))} — {cell(item.get('cause'))}" for item in recent),
         *( [] if recent else ["No meaningful opportunity-state changes recorded."] ),
+        "",
+        "## Qualitative digest",
+        "",
+        "### Change",
+        "",
+        *(f"- `{cell(item.get('situation_id'))}` changed from {cell(item.get('from'))} to {cell(item.get('to'))}; {cell(item.get('cause') or 'the retained evidence does not name a cause')}." for item in changes),
+        *( [] if changes else ["- No retained state transitions are available for interpretation."] ),
+        "",
+        "### Tensions",
+        "",
+        *(f"- {cell(item)}" for item in tensions),
+        *( [] if tensions else ["- No explicit tension is visible in the retained evidence; this is not a claim that none exists."] ),
+        "",
+        "### Alternative readings",
+        "",
+        "- Unknown or stale state can mean missing evidence rather than failure.",
+        "- A planning assignment or registered capability does not prove current deployment or availability.",
+        "- Different observations can reflect a changed encounter with the system rather than a contradiction to average away.",
+        "",
+        "### Human judgment",
+        "",
+        "- Review provenance and current material conditions before authorizing work; this digest does not rank, schedule, or decide.",
         "",
         "## Blocked / missing affordances",
         "",
@@ -785,6 +940,7 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         "schedule_freshness": (
             snapshot.get("schedule", {}).get("freshness") or {}
         ).get("generated_at"),
+        "labguard_security": (snapshot.get("labguard") or {}).get("generated_at"),
     }
     for name, status in snapshot["sources"].items():
         lines.append(
@@ -901,6 +1057,20 @@ def render_dashboard(snapshot: dict[str, Any]) -> str:
         )
     if not capabilities:
         lines.append("| — | — | UNKNOWN | 0 |")
+
+    labguard = snapshot.get("labguard")
+    lines.extend(["", "## Security observations", ""])
+    if not labguard:
+        lines.append("LabGuard security summary is unavailable.")
+    else:
+        assessment = labguard["assessment"]
+        lines.extend([
+            f"- Device: `{cell(labguard['device_id'])}`",
+            f"- Observation: **{cell(assessment['status'])}** · freshness **{cell(labguard['freshness'])}**",
+            f"- Review required: **{cell(assessment['review_required'])}** · findings {cell(assessment['finding_count'])} · reviews {cell(assessment['review_count'])}",
+            f"- Comparison incomplete: **{cell(assessment['incomplete_comparison'])}**",
+            "- Raw evidence is not included; inspect LabGuard for authorized detail.",
+        ])
 
     lines.extend(
         [

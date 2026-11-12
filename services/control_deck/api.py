@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ipaddress
 import json
 import mimetypes
@@ -338,10 +339,13 @@ def build_server(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Serve the loopback-only Homeauto Control Deck")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
     static_dir = DEFAULT_ROOT / "services" / "control_deck" / "web" / "dist"
     server = build_server(
         "127.0.0.1",
-        8765,
+        args.port,
         ControlDeckData(),
         static_dir if static_dir.is_dir() else None,
     )

@@ -53,7 +53,9 @@ class ReliabilityPathIntegrationTests(unittest.TestCase):
                 mock.patch.object(lab_console, "load_directives", return_value=([], [])),
                 mock.patch.object(lab_console, "load_routine_receipts", return_value=([], [])),
             ):
-                snapshot = lab_console.build_snapshot(config)
+                snapshot = lab_console.build_snapshot(
+                    config, now=datetime.fromisoformat("2026-10-13T15:00:00+00:00")
+                )
         snapshot["generated_at"] = "2026-10-13T15:00:00+00:00"
         return snapshot
 

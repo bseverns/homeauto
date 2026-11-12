@@ -16,10 +16,10 @@ SPEC.loader.exec_module(assistant_context)
 class AssistantContextTests(unittest.TestCase):
     def test_current_state_context_is_deterministic_and_excludes_raw_observations(self):
         state = {
-            "contract": {"name": "homeauto-world-state", "schema_version": "1.1.0"},
+            "contract": {"name": "homeauto-world-state", "schema_version": "1.2.0"},
             "generated_at": "2026-09-20T00:00:00+00:00",
             "opportunity_contract": {"name": "lab-opportunities", "schema_version": "1.0.0"},
-            "inputs": {"benlab": {}, "schedule": {}, "world_state": {}},
+            "inputs": {"benlab": {}, "schedule": {}, "world_state": {}, "life_inbox": {}},
             "opportunities": [{
                 "opportunity_id": "opportunity:a", "state": "available",
                 "action": {"project": "A", "next_action": "Do A"},

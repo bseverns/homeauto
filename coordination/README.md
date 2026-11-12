@@ -114,7 +114,7 @@ masquerade as ready production resources. Capability summaries are derived from 
 machine rows and retain machine IDs as evidence. Machine readiness changes share the
 existing 100-entry bounded transition history; raw telemetry changes are not recorded.
 
-`homeauto-world-state@1.1.0` embeds the versioned opportunity contract without taking
+`homeauto-world-state@1.2.0` embeds the versioned opportunity contract without taking
 upstream authority. Each opportunity keeps separate `action`, `capacity`, and
 `affordances` structures, stable action identity where supplied, queue order,
 provenance, warnings, and deterministic `why` checks. States are `available`,
@@ -122,6 +122,10 @@ provenance, warnings, and deterministic `why` checks. States are `available`,
 `insufficient_information`, and `not_currently_eligible`. Only fresh BenLab eligibility,
 fresh compatible capacity, and fresh same-scope affordances can produce `available`.
 State changes—not artifact rewrites with the same state—enter transition history.
+
+Optional `life-inbox` input is a local, human-approved personal-action feed. Its summaries
+appear only as `insufficient_information` opportunities: it supplies neither capacity,
+scheduling authority, runtime affordances, nor execution authority.
 
 For `benlab-actions@1.2.0`, homeauto validates the consumed export against the
 pinned upstream compatibility schema and preserves BenLab's stable `action_id` through

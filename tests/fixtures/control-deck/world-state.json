@@ -1,7 +1,7 @@
 {
   "contract": {
     "name": "homeauto-world-state",
-    "schema_version": "1.1.0",
+    "schema_version": "1.2.0",
     "authority": "read-only; no control actions"
   },
   "generated_at": "1970-01-01T00:00:00+00:00",
@@ -14,7 +14,8 @@
   "inputs": {
     "benlab": {},
     "schedule": {},
-    "world_state": {}
+    "world_state": {},
+    "life_inbox": {}
   },
   "observations": [],
   "machines": [
