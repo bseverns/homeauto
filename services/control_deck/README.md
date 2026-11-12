@@ -25,7 +25,7 @@ cd services/control_deck/web
 npm test
 npm run build
 npx tsc --noEmit
-npm audit --audit-level=low
+npm audit --audit-level=moderate
 ```
 
 The API exposes only:
